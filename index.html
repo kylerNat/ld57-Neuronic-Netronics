@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html>
+    <head>
+    </head>
+    <body style="margin: 0 !important; padding: 0 !important; overflow: hidden;">
+        <canvas id="my_canvas" width="640" height="480"></canvas>
+        <script>
+            let import_object;
+            async function hash_file(url) {
+                const response = await fetch(url);
+                const file_buffer = await response.arrayBuffer();
+                const hash_buffer = await crypto.subtle.digest('SHA-256', file_buffer);
+                return Array.from(new Uint8Array(hash_buffer))
+                    .map(byte => byte.toString(16).padStart(2, '0'))
+                    .join('');
+            }
+
+            async function check_for_file_change(url) {
+                const storage_key = url.concat('_hash');
+                const stored_hash = localStorage.getItem(storage_key);
+                const current_hash = await hash_file(url);
+
+                if (stored_hash !== current_hash) {
+                    localStorage.setItem(storage_key, current_hash);
+
+                    if(stored_hash) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+
+            let game_update;
+
+            async function monitor_files() {
+                if(await check_for_file_change("main.wasm")) {
+                    WebAssembly.instantiateStreaming(fetch("main.wasm"), import_object).then((obj) => {
+                        game_update = obj.instance.exports.update;
+                    });
+                    console.log("updated wasm")
+                }
+
+                if(await check_for_file_change("index.html")) {
+                    window.location.reload();
+                }
+            }
+            setInterval(monitor_files, 500);
+
+            let last_time;
+            function main_loop(time) {
+                if(last_time === undefined) {
+                    last_time = time;
+                }
+
+                const nominal_dt = 1000.0/120.0;
+                let iterations = 0;
+                while(last_time < time && iterations++ < 2) {
+                    if(game_update) {
+                        game_update();
+                    }
+                    last_time += nominal_dt;
+                }
+                if(last_time < time) last_time = time;
+
+                requestAnimationFrame(main_loop);
+            }
+
+            let canvas = document.getElementById("my_canvas");
+            const gl = canvas.getContext("webgl2");
+            function resize() {
+                canvas.width  = window.innerWidth;
+                canvas.height = window.innerHeight;
+            }
+            window.addEventListener("resize", resize);
+            resize();
+            if(gl === null) {
+                alert("Unable to initialize WebGL. Your browser or machine may not support it");
+            } else {
+                const ac = new AudioContext({latencyHint: "interactive", sampleRate: 44100});
+                const blob = new Blob([
+                    `class MyAudioProcessor extends AudioWorkletProcessor {
+                        constructor(options) {
+                            super();
+                            this.total_samples = 0;
+                            this.shared_buffer = options.processorOptions;
+                            this.shared_array = new Float32Array(this.shared_buffer);
+                            this.shared_arrayi = new Int32Array(this.shared_buffer);
+                        }
+                        process(input_list, output_list, parameters) {
+                            const output = output_list[0]
+                            const n_samples = output[0].length;
+                            for(let i = 0; i < output.length; i++) {
+                                for(let j = 0; j < n_samples; j++) {
+                                    output[i][j] = this.shared_array[(this.total_samples+j)&8191];
+                                }
+                            }
+                            Atomics.add(this.shared_arrayi, 8192, n_samples);
+                            this.total_samples += n_samples;
+                            return true;
+                        }
+                    }
+                    registerProcessor("my-processor", MyAudioProcessor);`], {type: "text/javascript"});
+                const worklet_url = URL.createObjectURL(blob);
+                const gain = ac.createGain();
+                gain.gain.value = 0.00;
+
+                WebAssembly.instantiateStreaming(fetch("data.wasm"), {}).then((obj) => {
+                    const mem = obj.instance.exports.mem;
+                    const shared_mem = obj.instance.exports.shared_mem;
+
+                    const mem_f32 = new Float32Array(mem.buffer);
+                    const mem_i32 = new Int32Array(mem.buffer);
+
+                    ac.audioWorklet.addModule(worklet_url).then(() => {
+                        const awn = new AudioWorkletNode(ac, "my-processor", {processorOptions: shared_mem.buffer});
+                        awn.connect(gain).connect(ac.destination);
+
+                        addEventListener("mousemove", (event) => {
+                            <!-- osc.frequency.setTargetAtTime(10.0*event.clientX, ac.currentTime, 0.01); -->
+                            gain.gain.setTargetAtTime(1.0-event.clientY/canvas.height, ac.currentTime, 0.01);
+                            <!-- console.log(1.0-event.clientY/canvas.height); -->
+                            ac.resume();
+                        });
+                    });
+
+                    import_object = {
+                        gl: {
+                            createShader: (type) => gl.createShader(type),
+                            shaderSource: (shader, source) => gl.shaderSource(shader, source),
+                            compileShader: (shader) => gl.compileShader(shader),
+                            getShaderParameter: (shader, param) => gl.getShaderParameter(shader, param),
+                            deleteShader: (shader) => gl.deleteShader(shader),
+                            attachShader: (program, shader) => gl.attachShader(program, shader),
+                            linkProgram: (program) => gl.linkProgram(program),
+                            getProgramParameter: (program, param) => gl.getProgramParameter,
+                            deleteProgram: (program) => gl.deleteProgram,
+                            getAttribLocation: (program, attrib) => gl.getAttribLocation(program, attrib),
+                            createBuffer: () => gl.createBuffer(),
+                            bindBuffer: (target, buffer) => gl.bindBuffer(target, buffer),
+                            bufferData: (target, data, n_data, usage) => gl.bufferData(target, mem_f32.slice(data, n_data), usage),
+
+                            clearColor: (r, g, b, a) => gl.clearColor(r, g, b, a),
+                            clear: (flags) => gl.clear(flags),
+                        },
+                        js: {
+                            mem: mem,
+                            shared_mem: shared_mem,
+                            sin: (x) => Math.sin(x),
+                            cos: (x) => Math.cos(x),
+                        },
+                    }
+
+                    WebAssembly.instantiateStreaming(fetch("main.wasm"), import_object).then((obj) => {
+                        game_update = obj.instance.exports.update;
+                    });
+
+                    requestAnimationFrame(main_loop);
+                });
+            }
+        </script>
+    </body>
+</html>
