@@ -1,0 +1,7 @@
+0x0000000 video block
+0x012c000 mouse_x
+0x012c004 mouse_y
+0x012c008 mouse_click
+0x0130000 seed
+
+

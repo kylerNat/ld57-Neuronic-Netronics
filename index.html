@@ -2,10 +2,11 @@
 <html>
     <head>
     </head>
-    <body style="margin: 0 !important; padding: 0 !important; overflow: hidden;">
-        <canvas id="my_canvas" width="640" height="480"></canvas>
+    <body style="margin: 0 !important; padding: 0 !important; overflow: hidden; display: flex; justify-content: center; align-items: center; height: 100vh; background-color: black;">
+        <canvas id="my_canvas" width="640" height="480" style="width: 100vw; height: 100vh; object-fit: contain; image-rendering: pixelated; transform: scaleY(-1)"></canvas>
         <script>
             let import_object;
+            let image_data;
             async function hash_file(url) {
                 const response = await fetch(url);
                 const file_buffer = await response.arrayBuffer();
@@ -30,7 +31,14 @@
                 return false;
             }
 
+            const render_width = 640;
+            const render_height = 480;
+            const aspect_ratio = 1.0*render_width/render_height;
+            const mouse_offset = render_width*render_height;
+
             let game_update;
+            let mem_i32
+            let mem_f32
 
             async function monitor_files() {
                 if(await check_for_file_change("main.wasm")) {
@@ -46,17 +54,32 @@
             }
             setInterval(monitor_files, 500);
 
+            let canvas = document.getElementById("my_canvas");
+            const ctx = canvas.getContext("2d");
+            ctx.fillStyle = "white"
+            ctx.font = "24 sans"
+            ctx.transform(1, 0, 0, -1, 0, 0)
+
             let last_time;
+            let drawn_text = [];
             function main_loop(time) {
                 if(last_time === undefined) {
                     last_time = time;
                 }
 
-                const nominal_dt = 1000.0/120.0;
+                const nominal_dt = 1000.0/60.0;
                 let iterations = 0;
                 while(last_time < time && iterations++ < 2) {
                     if(game_update) {
                         game_update();
+                        if(image_data) {
+                            ctx.putImageData(image_data, 0, 0);
+                        }
+                        for(let i = 0; i < drawn_text.length; i++) {
+                            ctx.fillText(drawn_text[i].text, drawn_text[i].x, drawn_text[i].y)
+                        }
+                        drawn_text.length = 0
+                        mem_i32[mouse_offset+2] = ((mem_i32[mouse_offset+2]<<1) | mem_i32[mouse_offset+2]) & 0x2;
                     }
                     last_time += nominal_dt;
                 }
@@ -65,98 +88,89 @@
                 requestAnimationFrame(main_loop);
             }
 
-            let canvas = document.getElementById("my_canvas");
-            const gl = canvas.getContext("webgl2");
-            function resize() {
-                canvas.width  = window.innerWidth;
-                canvas.height = window.innerHeight;
-            }
-            window.addEventListener("resize", resize);
-            resize();
-            if(gl === null) {
-                alert("Unable to initialize WebGL. Your browser or machine may not support it");
-            } else {
-                const ac = new AudioContext({latencyHint: "interactive", sampleRate: 44100});
-                const blob = new Blob([
-                    `class MyAudioProcessor extends AudioWorkletProcessor {
-                        constructor(options) {
-                            super();
-                            this.total_samples = 0;
-                            this.shared_buffer = options.processorOptions;
-                            this.shared_array = new Float32Array(this.shared_buffer);
-                            this.shared_arrayi = new Int32Array(this.shared_buffer);
-                        }
-                        process(input_list, output_list, parameters) {
-                            const output = output_list[0]
-                            const n_samples = output[0].length;
-                            for(let i = 0; i < output.length; i++) {
-                                for(let j = 0; j < n_samples; j++) {
-                                    output[i][j] = this.shared_array[(this.total_samples+j)&8191];
-                                }
+            const ac = new AudioContext({latencyHint: "interactive", sampleRate: 44100});
+            const blob = new Blob([
+                `class MyAudioProcessor extends AudioWorkletProcessor {
+                    constructor(options) {
+                        super();
+                        this.total_samples = 0;
+                        this.shared_buffer = options.processorOptions;
+                        this.shared_array = new Float32Array(this.shared_buffer);
+                        this.shared_arrayi = new Int32Array(this.shared_buffer);
+                    }
+                    process(input_list, output_list, parameters) {
+                        const output = output_list[0]
+                        const n_samples = output[0].length;
+                        for(let i = 0; i < output.length; i++) {
+                            for(let j = 0; j < n_samples; j++) {
+                                output[i][j] = this.shared_array[(this.total_samples+j)&8191];
+                                this.shared_array[(this.total_samples+j)&8191] = 0;
                             }
-                            Atomics.add(this.shared_arrayi, 8192, n_samples);
-                            this.total_samples += n_samples;
-                            return true;
                         }
+                        Atomics.add(this.shared_arrayi, 8192, n_samples);
+                        this.total_samples += n_samples;
+                        return true;
                     }
-                    registerProcessor("my-processor", MyAudioProcessor);`], {type: "text/javascript"});
-                const worklet_url = URL.createObjectURL(blob);
-                const gain = ac.createGain();
-                gain.gain.value = 0.00;
+                }
+                registerProcessor("my-processor", MyAudioProcessor);`], {type: "text/javascript"});
+            const worklet_url = URL.createObjectURL(blob);
+            const gain = ac.createGain();
+            gain.gain.value = 1.00;
 
-                WebAssembly.instantiateStreaming(fetch("data.wasm"), {}).then((obj) => {
-                    const mem = obj.instance.exports.mem;
-                    const shared_mem = obj.instance.exports.shared_mem;
+            WebAssembly.instantiateStreaming(fetch("data.wasm"), {}).then((obj) => {
+                const mem = obj.instance.exports.mem;
+                const shared_mem = obj.instance.exports.shared_mem;
 
-                    const mem_f32 = new Float32Array(mem.buffer);
-                    const mem_i32 = new Int32Array(mem.buffer);
+                mem_f32 = new Float32Array(mem.buffer);
+                mem_i32 = new Int32Array(mem.buffer);
+                mem_u8 = new Uint8Array(mem.buffer);
+                const text_decoder = new TextDecoder("utf-8");
+                const mem_image = new Uint8ClampedArray(mem.buffer, 0, 4*render_width*render_height);
+                image_data = new ImageData(mem_image, render_width, render_height);
 
-                    ac.audioWorklet.addModule(worklet_url).then(() => {
-                        const awn = new AudioWorkletNode(ac, "my-processor", {processorOptions: shared_mem.buffer});
-                        awn.connect(gain).connect(ac.destination);
-
-                        addEventListener("mousemove", (event) => {
-                            <!-- osc.frequency.setTargetAtTime(10.0*event.clientX, ac.currentTime, 0.01); -->
-                            gain.gain.setTargetAtTime(1.0-event.clientY/canvas.height, ac.currentTime, 0.01);
-                            <!-- console.log(1.0-event.clientY/canvas.height); -->
-                            ac.resume();
-                        });
-                    });
-
-                    import_object = {
-                        gl: {
-                            createShader: (type) => gl.createShader(type),
-                            shaderSource: (shader, source) => gl.shaderSource(shader, source),
-                            compileShader: (shader) => gl.compileShader(shader),
-                            getShaderParameter: (shader, param) => gl.getShaderParameter(shader, param),
-                            deleteShader: (shader) => gl.deleteShader(shader),
-                            attachShader: (program, shader) => gl.attachShader(program, shader),
-                            linkProgram: (program) => gl.linkProgram(program),
-                            getProgramParameter: (program, param) => gl.getProgramParameter,
-                            deleteProgram: (program) => gl.deleteProgram,
-                            getAttribLocation: (program, attrib) => gl.getAttribLocation(program, attrib),
-                            createBuffer: () => gl.createBuffer(),
-                            bindBuffer: (target, buffer) => gl.bindBuffer(target, buffer),
-                            bufferData: (target, data, n_data, usage) => gl.bufferData(target, mem_f32.slice(data, n_data), usage),
-
-                            clearColor: (r, g, b, a) => gl.clearColor(r, g, b, a),
-                            clear: (flags) => gl.clear(flags),
-                        },
-                        js: {
-                            mem: mem,
-                            shared_mem: shared_mem,
-                            sin: (x) => Math.sin(x),
-                            cos: (x) => Math.cos(x),
-                        },
-                    }
-
-                    WebAssembly.instantiateStreaming(fetch("main.wasm"), import_object).then((obj) => {
-                        game_update = obj.instance.exports.update;
-                    });
-
-                    requestAnimationFrame(main_loop);
+                addEventListener("mousemove", (event) => {
+                    const mouse_scale = Math.max(render_height/window.innerHeight, render_width/window.innerWidth);
+                    mem_f32[mouse_offset] = (event.clientX-0.5*window.innerWidth)*mouse_scale+0.5*render_width;
+                    mem_f32[mouse_offset+1] = (0.5*window.innerHeight-event.clientY)*mouse_scale+0.5*render_height;
+                    ac.resume();
                 });
-            }
+
+                addEventListener("mousedown", (event) => {
+                    mem_i32[mouse_offset+2] = mem_i32[mouse_offset+2]|1;
+                });
+
+                addEventListener("mouseup", (event) => {
+                    mem_i32[mouse_offset+2] = 0;
+                });
+
+                ac.audioWorklet.addModule(worklet_url).then(() => {
+                    const awn = new AudioWorkletNode(ac, "my-processor", {processorOptions: shared_mem.buffer});
+                    awn.connect(gain).connect(ac.destination);
+                });
+
+                import_object = {
+                    js: {
+                        mem: mem,
+                        shared_mem: shared_mem,
+                        sin: (x) => Math.sin(x),
+                        cos: (x) => Math.cos(x),
+                        exp: (x) => Math.exp(x),
+                        print: (x) => console.log(x),
+                        draw_text: (i, len, x, y) => drawn_text.push(
+                         {
+                             text: text_decoder.decode(mem_u8.slice(i, i+len)),
+                             x: x,
+                             y: -y,
+                        })
+                    },
+                }
+
+                WebAssembly.instantiateStreaming(fetch("main.wasm"), import_object).then((obj) => {
+                    game_update = obj.instance.exports.update;
+                });
+
+                requestAnimationFrame(main_loop);
+            });
         </script>
     </body>
 </html>
