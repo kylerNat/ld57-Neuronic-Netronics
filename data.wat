@@ -1,5 +1,5 @@
 (memory $mem 25)
-(data (i32.const 0x130000) "\01\01\01\01\02\02\02\02\03\03\03\03\04\04\04\04")
+(data (i32.const 0x12d000) "\01\51\41\31\22\12\02\92\83\73\63\53\44\34\24\14")
 (data (i32.const 0x155000) "Thanks for playing!Made by Kyler Natividad in 48 hours for Ludum Dare 57(ps. wishlist Primordialis on steam)")
 (export "mem" (memory $mem))
 

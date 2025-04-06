@@ -6,7 +6,7 @@
 0x012c010 middle_click
 0x012c014 scroll_wheel
 
-0x0130000 seed
+0x012d000 seed
 
 0x0130800 noise
 0x0130804 time
@@ -26,6 +26,7 @@
 0x0132014 clicked_link
 0x0132018 hovered_link
 0x013201c new_node
+0x0132020 current_link_weight
 
 0x0133000 current_level
 0x0133004 completed_levels
@@ -36,6 +37,8 @@
 0x0133018 shake_y
 0x013301c shake_dx
 0x0133020 shake_dy
+
+0x0133100 flames amount
 
 0x0134004 solved_secret
 0x0134008 secret_solved_time
@@ -58,6 +61,8 @@
 0x0147000 node_target
 0x0148000 node_activation
 0x0149000 node_inputs
+
+audio stuff idk
 
 0x0155000 credit strings
 

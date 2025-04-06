@@ -11,6 +11,7 @@
 (func $draw_text (import "js" "draw_text") (param i32 i32 f32 f32))
 (func $save_data (import "js" "save_data") (param i32 i32))
 (func $load_data (import "js" "load_data") (param i32) (result i32))
+(func $load_saved_level (import "js" "load_saved_level"))
 
 (func $serialize_stats (result i32)
       (local $ptr i32)
@@ -323,10 +324,36 @@
       i32.const 0x130800 i32.add
       f32.load)
 
+(func $hashi (param i32) (result i32)
+    ;; https://nullprogram.com/blog/2018/07/31/
+    local.get 0
+    local.get 0
+    i32.const 16
+    i32.shr_u
+    i32.xor
+
+    i32.const 0x7feb352d
+    i32.mul
+
+    local.tee 0
+    local.get 0
+    i32.const 15
+    i32.shr_u
+    i32.xor
+
+    i32.const 0x846ca68b
+    i32.mul
+
+    local.tee 0
+    local.get 0
+    i32.const 16
+    i32.shr_u
+    i32.xor)
+
 (func $randi (result i32) (local i32)
     ;; https://nullprogram.com/blog/2018/07/31/
-    i32.const 0x130000
-    i32.const 0x130000 i32.load
+    i32.const 0x12d000
+    i32.const 0x12d000 i32.load
     local.tee 0
     local.get 0
     i32.const 16
@@ -356,8 +383,8 @@
 
 (func $randi32x4 (result v128) (local v128)
     ;; https://nullprogram.com/blog/2018/07/31/
-    i32.const 0x130000
-    i32.const 0x130000 v128.load
+    i32.const 0x12d000
+    i32.const 0x12d000 v128.load
     local.tee 0
     local.get 0
     i32.const 16
@@ -2101,8 +2128,8 @@
             local.get $dx local.get $mx local.get $ax f32.sub local.tee $rmx f32.mul
             local.get $dy local.get $my local.get $ay f32.sub local.tee $rmy f32.mul
             f32.add
-            f32.const 24 f32.max
-            local.get $d f32.const 24 f32.sub f32.min
+            f32.const 28 f32.max
+            local.get $d f32.const 28 f32.sub f32.min
             local.set $dot
 
             local.get $rmx local.get $dx local.get $dot f32.mul f32.sub local.tee $rmx local.get $rmx f32.mul
@@ -2132,12 +2159,13 @@
             local.get $clicked_link local.get $i i32.const 1 i32.add i32.eq
             (if  (then
                    local.get $dot
-                   f32.const 24 f32.sub
-                   local.get $d f32.const 48 f32.sub f32.div
+                   f32.const 28 f32.sub
+                   local.get $d f32.const 56 f32.sub f32.div
                    f32.const 2 f32.mul
                    f32.const 1 f32.sub
                    local.set $strength
                    i32.const 0x162000 local.get $i4 i32.add local.get $strength f32.store
+                   i32.const 0x0132020 local.get $strength f32.store
                    ))
 
             local.get $dr
@@ -2230,6 +2258,10 @@
       local.get $i local.get $j
       i32.eq
       (if (then return))
+
+      i32.const 0x130008
+      i32.const 0x130008
+      f32.load f32.const 0.02 f32.add f32.store
 
       i32.const 0x0133010 i32.const 0 i32.store ;; reset solved case count
       i32.const 0x0134010 i32.const 0 i32.store ;; reset secret solved case count
@@ -2965,10 +2997,11 @@
       i32.const 0x013201c local.get $new_node i32.store
       )
 
-(func $wave_gen (param $target f32) (param $attack f32) (param $release f32) (param $frequency f32) (param $type i32) (param $address i32) (result f32)
+(func $wave_gen_sin (param $target f32) (param $decay f32) (param $frequency f32) (param $address i32) (result f32)
       (local $phase f32)
       (local $amplitude f32)
 
+      local.get $address
       local.get $address
       f32.load
       local.tee $phase
@@ -2977,14 +3010,63 @@
       local.get $phase
       f32.floor
       f32.sub
+      local.get $frequency
+      f32.add
       f32.const 6.283185307179586 f32.mul
-      local.set $phase
+      local.tee $phase
+      f32.store
 
       local.get $address
-      i32.const 4 i32.add f32.load
+      i32.const 4 i32.add
+      local.tee $address
+      local.get $address
+      f32.load
       local.tee $amplitude
-      ;; local.get
-      )
+      local.get $target
+      f32.sub
+      local.get $decay f32.mul
+      local.get $target
+      f32.add
+      local.tee $amplitude
+      f32.store
+      local.get $phase
+      call $sin
+      local.get $amplitude
+      f32.mul)
+
+(func $wave_gen_saw (param $target f32) (param $decay f32) (param $frequency f32) (param $address i32) (result f32)
+      (local $phase f32)
+      (local $amplitude f32)
+
+      local.get $address
+      local.get $address
+      f32.load
+      local.tee $phase
+      local.get $phase
+      f32.floor
+      f32.sub
+      local.get $frequency
+      f32.add
+      local.tee $phase
+      f32.store
+
+      local.get $address
+      i32.const 4 i32.add
+      local.tee $address
+      local.get $address
+      f32.load
+      local.tee $amplitude
+      local.get $target
+      f32.sub
+      local.get $decay f32.mul
+      local.get $target
+      f32.add
+      local.tee $amplitude
+      f32.store
+      local.get $phase
+      call $saw
+      local.get $amplitude
+      f32.mul)
 
 (func $oscillator (param $x0 f32) (param $decay f32) (param $k f32) (param $address i32) (result f32)
       (local $x f32)
@@ -3113,11 +3195,15 @@
             i32.const 0x132008 i32.load ;; pending_node
             i32.eqz
             i32.eqz
+            i32.const 0x013200c i32.load ;; pending_link
+            i32.eqz
+            i32.eqz
+            i32.or
             f32.convert_i32_s
             f32.mul
             f32.const 1.5
             f32.mul
-            f32.const 0.9999 f32.const 0.0005 i32.const 0x12F004 call $oscillator
+            f32.const 0.9999 f32.const 0.0005 i32.const 0x130004 call $oscillator
             f32.const 0.9 i32.const 0x13002c call $lowpass
             f32.const 0.9 i32.const 0x130030 call $lowpass
             f32.const 0.9 i32.const 0x130034 call $lowpass
@@ -3141,15 +3227,108 @@
             f32.const 0.1 f32.mul
             f32.add
 
-            f32.const 0
-            local.set $noise
+            local.get $noise
+            f32.const 0.1 f32.mul
+            ;; f32.const 0.999 i32.const 0x15004c call $lowpass
+            f32.const 0.9999 i32.const 0x15004c call $lowpass
+            ;; drop f32.const 1
+            f32.const 0.9999 f32.const 0.01 i32.const 0x150008 call $wave_gen_sin
+            ;; f32.const 0.999 f32.const 0.006 i32.const 0x150000 call $wave_gen_sin
+            f32.add
 
-            ;; f32.const 0.9999 f32.const 0.002 i32.const 0x13000c call $oscillator
-            ;; f32.const 0.9999 f32.const 0.003.0 i32.const 0x13000c call $oscillator
+            local.get $noise
+            f32.const 0.01 f32.mul
+            f32.const 0.9996 f32.const 0.008 i32.const 0x150014 call $oscillator
+            f32.const 0.9999 i32.const 0x15001c call $lowpass
+            f32.add
 
-            ;; f32.const 0.01 i32.const 0x13002c call $lowpass
-            ;; f32.const 0.01 i32.const 0x13003c call $lowpass
-            ;; f32.const 0.01 i32.const 0x130028 call $highpass
+            local.get $noise
+            f32.const 0.001 f32.mul
+            f32.const 0.9996 f32.const 0.01 i32.const 0x150024 call $oscillator
+            f32.const 0.9999 i32.const 0x15002c call $lowpass
+            f32.const 1.2 f32.mul
+            f32.add
+
+            local.get $noise
+            f32.const 0.001 f32.mul
+            f32.const 0.9996 f32.const 0.01666666 i32.const 0x150034 call $oscillator
+            f32.const 0.9999 i32.const 0x15003c call $lowpass
+            f32.const 1.4 f32.mul
+            f32.add
+
+            local.get $noise
+            f32.const 0.001 f32.mul
+            f32.const 0.9999 f32.const 0.03333333 i32.const 0x150044 call $oscillator
+            f32.const 0.9999 i32.const 0x15004c call $lowpass
+            f32.const 2.0 f32.mul
+            f32.add
+
+            local.get $noise
+            i32.const 0x0133100
+            f32.load
+            local.tee $osc
+            local.get $osc
+            f32.mul
+            f32.mul
+            f32.const 0.015 f32.mul
+            f32.const 0.99 i32.const 0x150070 call $lowpass
+            f32.const 0.95 f32.const 0.001 i32.const 0x150064 call $oscillator
+            f32.const 0.95 f32.const 0.002 i32.const 0x150074 call $oscillator
+            ;; f32.const 0.95 f32.const 0.004 i32.const 0x150084 call $oscillator
+            ;; f32.const 0.9999 i32.const 0x15006c call $lowpass
+            f32.const 2.0 f32.mul
+            f32.add
+
+            local.get $noise
+            f32.const 0.015 f32.mul
+            f32.const 0.99 i32.const 0x150080 call $lowpass
+            f32.const 0.999 f32.const 0.001 i32.const 0x150084 call $oscillator
+            local.get $noise
+            f32.mul
+            f32.const 0.9999 f32.const 0.0001 i32.const 0x150094 call $oscillator
+            f32.const 0.99 i32.const 0x150090 call $lowpass
+            f32.const 0.15 f32.mul
+            f32.add
+
+            local.get $noise
+            f32.const 0.015 f32.mul
+            f32.const 0.999 i32.const 0x150100 call $lowpass
+            f32.const 0.9997 f32.const 0.005 i32.const 0x150104 call $wave_gen_saw
+            ;; f32.const 0.99 f32.const 0.0601 i32.const 0x150114 call $oscillator
+            f32.const 0.006 f32.mul
+            f32.add
+
+            local.get $noise
+            f32.const 0.015 f32.mul
+            f32.const 0.999 i32.const 0x150110 call $lowpass
+            f32.const 0.999 f32.const 0.001 i32.const 0x150114 call $oscillator
+            local.get $noise
+            f32.mul
+            f32.const 0.995 i32.const 0x150120 call $lowpass
+            f32.const 0.995 i32.const 0x150130 call $lowpass
+            ;; f32.const 0.95 i32.const 0x150140 call $lowpass
+            f32.const 0.997 f32.const 0.007 i32.const 0x150124 call $oscillator
+            f32.const 0.14 f32.mul
+            f32.add
+
+            local.get $noise
+            f32.const 0.015 f32.mul
+            f32.const 0.0 f32.const 0.5
+            i32.const 0x0132014 i32.load i32.eqz
+            select
+            f32.add
+            f32.const 0.995 i32.const 0x150130 call $lowpass
+            f32.const 0.9995
+            i32.const 0x0132020 f32.load f32.abs
+            local.tee $osc
+            local.get $osc
+            f32.mul
+            f32.const 0.01 f32.mul
+            f32.const 0.001 f32.add
+            i32.const 0x150134 call $wave_gen_sin
+            ;; f32.const 0.99 f32.const 0.0601 i32.const 0x150114 call $oscillator
+            f32.const 0.016 f32.mul
+            f32.add
 
             local.set $osc
 
@@ -3251,6 +3430,11 @@
             local.get $clicked
             (if (then
                   i32.const 0x12c008 i32.const 0 i32.store
+                  i32.const 0x150118
+                  i32.const 0x150118
+                  f32.load
+                  f32.const 1.5 f32.add
+                  f32.store
 
                   local.get $level
                   i32.const 1 i32.add
@@ -3281,6 +3465,11 @@
             local.get $clicked
             (if (then
                   i32.const 0x12c008 i32.const 0 i32.store
+                  i32.const 0x150118
+                  i32.const 0x150118
+                  f32.load
+                  f32.const 1.5 f32.add
+                  f32.store
 
                   local.get $level
                   i32.const 1 i32.sub
@@ -3314,6 +3503,12 @@
             local.get $clicked
             (if (then
                   i32.const 0x12c008 i32.const 0 i32.store
+                  i32.const 0x150118
+                  i32.const 0x150118
+                  f32.load
+                  f32.const 1.5 f32.add
+                  f32.store
+
                   i32.const 0x134024
                   i32.const 1
                   i32.store
@@ -3433,7 +3628,9 @@
       v128.const i32x4 0xFF 0xFF 0xFF 0xFF i32x4.min_s
       v128.const i8x16 0 4 8 12 0 0 0 0 0 0 0 0 0 0 0 0
       i8x16.swizzle
-      i32x4.extract_lane 0)
+      i32x4.extract_lane 0
+      i32.const 0xFFFF1FFF i32.and
+      )
 
 (func $do_credits
       (local $credit_scroll f32)
@@ -3489,13 +3686,21 @@
       (local $i i32)
       (local $x i32)
       (local $y i32)
+      (local $base i32)
+      (local $vx v128)
+      (local $vy0 v128)
+      (local $vy v128)
+      (local $vptr v128)
       (local $r f32)
-      (local $offset_x f32)
-      (local $offset_y f32)
+      (local $offset_x v128)
+      (local $offset_y v128)
       (local $level i32)
       (local $credits i32)
       (local $credit_scroll f32)
       (local $time i32)
+      (local $background_blur f32)
+      (local $background_color i32)
+      (local $flames f32)
 
       i32.const 0x133000 i32.load local.tee $level
       i32.eqz
@@ -3515,6 +3720,18 @@
       local.tee $time
       i32.store
 
+      ;; call $randf_s
+      ;; f32.const 1.0 f32.mul
+      ;; i32.trunc_f32_s
+      ;; i32x4.splat
+      ;; local.set $offset_x
+
+      ;; ;; call $randf_s
+      ;; ;; f32.const 1.5 f32.mul
+      ;; ;; i32.trunc_f32_s
+      ;; ;; i32x4.splat
+      ;; ;; local.set $offset_y
+
       local.get $time i32.const 0x7F i32.and
       i32.eqz
       (if (then
@@ -3526,16 +3743,6 @@
             local.get 0
             call $save_data))
 
-      ;; i32.const 0x12c008 i32.load
-      ;; (if (then
-      ;;       i32.const 0x12c000 f32.load
-      ;;       f32.neg
-      ;;       local.set $offset_x
-
-      ;;       i32.const 0x12c004 f32.load
-      ;;       f32.neg
-      ;;       local.set $offset_y))
-
       i32.const 0x0134024 ;; credits
       i32.load
       local.set $credits
@@ -3544,53 +3751,36 @@
       f32.load
       local.set $credit_scroll
 
-      (loop $i_loop
-            local.get $i
-            i32.const 640
-            i32.rem_u
-            local.set $x
+      ;; f32.const 0.2
+      i32.const 0x0133010 i32.load ;; count solved cases
+      i32.popcnt
+      i32.const 0x0134010 i32.load
+      i32.popcnt
+      i32.add
+      f32.convert_i32_u
 
-            local.get $i
-            i32.const 640
-            i32.div_u
-            local.set $y
+      local.tee $flames
+      i32.const 0x0133100 local.get $flames f32.store
 
-            ;; get the pixel address
-            local.get $i
-            i32.const 4
-            i32.mul
+      ;; f32.div
+      f32.const -0.5 f32.mul
+      f32.const -1.5 f32.add
+      call $exp
+      local.set $background_blur
 
-            i32.const 0x402039
+      ;; i32.const 0xFF302034
+      ;; local.set $background_color
 
-            local.get $x
-            call $randf_s
-            f32.const 1.5 f32.mul
-            i32.trunc_f32_s
-            i32.add
-
-            i32x4.splat
-            v128.const i32x4 0 0 0 0 i32x4.max_s
-            v128.const i32x4 639 0 0 0 i32x4.min_s
-            i32x4.extract_lane 0
-
+      (loop $y_loop
             local.get $y
-            call $randf_s
-            f32.const 1.5 f32.mul
-            i32.trunc_f32_s
-            i32.add
-
             i32x4.splat
-            v128.const i32x4 0 0 0 0 i32x4.max_s
-            v128.const i32x4 479 0 0 0 i32x4.min_s
-            i32x4.extract_lane 0
-            i32.const 640 i32.mul
-            i32.add
+            local.set $vy0
+            local.get $y
+            i32.const 2560 i32.mul
+            local.set $base
+            i32.const 0 local.set $x
 
-            i32.const 4
-            i32.mul
-            i32.load
-            f32.const 0.9
-            call $blend_color
+            i32.const 0xFF302034
 
             local.get $credits
             (if (param i32) (result i32)
@@ -3607,29 +3797,188 @@
                 f32.const 1 f32.min
                 call $blend_color
                   ))
+            local.set $background_color
 
-            i32.const 0xFF000000
-            i32.or
+            (loop $x_loop
+                  local.get $x
+                  i32.const 4 i32.mul
+                  local.get $base
+                  i32.add
 
-            ;; ;; motion blur
-            ;; local.get $i
-            ;; i32.const 4
-            ;; i32.mul
-            ;; i32.load
-            ;; i32.const 0xfefefefe i32.and
-            ;; i32.const 1
-            ;; i32.shr_u
-            ;; i32.or
+                  local.get $vy0
+                  call $randi32x4
+                  local.tee $offset_y
+                  i32.const 31
+                  i32x4.shr_s
+                  i32x4.add
+                  ;; local.get $offset_y
+                  ;; v128.const i32x4 1 1 1 1
+                  ;; v128.and
+                  ;; i32x4.add
+                  v128.const i32x4 0 0 0 0 i32x4.max_s
+                  v128.const i32x4 479 479 479 479 i32x4.min_s
+                  local.tee $vy
+                  v128.const i32x4 640 640 640 640 i32x4.mul
 
-            i32.store
+                  local.get $x
+                  i32x4.splat
+                  v128.const i32x4 0 1 2 3
+                  i32x4.add
 
-            local.get $i
-            i32.const 1
-            i32.add
-            local.tee $i
-            i32.const 307200
+                  local.tee $vx
+                  call $randi32x4
+                  local.tee $offset_x
+                  i32.const 31
+                  i32x4.shr_s
+                  i32x4.add
+                  local.get $offset_x
+                  v128.const i32x4 1 1 1 1
+                  v128.and
+                  i32x4.add
+                  v128.const i32x4 0 0 0 0 i32x4.max_s
+                  v128.const i32x4 639 639 639 639 i32x4.min_s
+                  local.tee $vx
+                  i32x4.add
+                  v128.const i32x4 4 4 4 4 i32x4.mul
+
+                  local.tee $vptr
+                  local.get $vptr
+                  i32x4.extract_lane 0
+                  i32.load
+                  local.get $background_color
+                  local.get $background_blur
+                  call $blend_color
+                  i32x4.replace_lane 0
+                  local.tee $vptr
+
+                  local.get $vptr
+                  i32x4.extract_lane 1
+                  i32.load
+                  local.get $background_color
+                  local.get $background_blur
+                  call $blend_color
+                  i32x4.replace_lane 1
+                  local.tee $vptr
+
+                  local.get $vptr
+                  i32x4.extract_lane 2
+                  i32.load
+                  local.get $background_color
+                  local.get $background_blur
+                  call $blend_color
+                  i32x4.replace_lane 2
+                  local.tee $vptr
+
+                  local.get $vptr
+                  i32x4.extract_lane 3
+                  i32.load
+                  local.get $background_color
+                  local.get $background_blur
+                  call $blend_color
+                  i32x4.replace_lane 3
+                  local.tee $vptr
+
+                  v128.store
+
+                  local.get $x
+                  i32.const 4 i32.add
+                  local.tee $x
+                  i32.const 640
+                  i32.lt_s
+                  br_if $x_loop)
+            local.get $y
+            i32.const 1 i32.add
+            local.tee $y
+            i32.const 480
             i32.lt_s
-            br_if $i_loop)
+            br_if $y_loop)
+
+      ;; (loop $i_loop
+      ;;       local.get $i
+      ;;       i32.const 640
+      ;;       i32.rem_u
+      ;;       local.set $x
+
+      ;;       local.get $i
+      ;;       i32.const 640
+      ;;       i32.div_u
+      ;;       local.set $y
+
+      ;;       ;; get the pixel address
+      ;;       local.get $i
+      ;;       i32.const 4
+      ;;       i32.mul
+
+      ;;       i32.const 0x402039
+
+      ;;       local.get $x
+      ;;       call $randf_s
+      ;;       f32.const 1.5 f32.mul
+      ;;       i32.trunc_f32_s
+      ;;       i32.add
+
+      ;;       i32x4.splat
+      ;;       v128.const i32x4 0 0 0 0 i32x4.max_s
+      ;;       v128.const i32x4 639 0 0 0 i32x4.min_s
+      ;;       i32x4.extract_lane 0
+
+      ;;       local.get $y
+      ;;       call $randf_s
+      ;;       f32.const 1.5 f32.mul
+      ;;       i32.trunc_f32_s
+      ;;       i32.add
+
+      ;;       i32x4.splat
+      ;;       v128.const i32x4 0 0 0 0 i32x4.max_s
+      ;;       v128.const i32x4 479 0 0 0 i32x4.min_s
+      ;;       i32x4.extract_lane 0
+      ;;       i32.const 640 i32.mul
+      ;;       i32.add
+
+      ;;       i32.const 4
+      ;;       i32.mul
+      ;;       i32.load
+      ;;       f32.const 0.9
+      ;;       call $blend_color
+
+      ;;       local.get $credits
+      ;;       (if (param i32) (result i32)
+      ;;         (then
+      ;;           i32.const 0x000000
+      ;;           local.get $y
+      ;;           f32.convert_i32_s
+      ;;           local.get $credit_scroll
+      ;;           f32.const -500.0
+      ;;           f32.add
+      ;;           f32.add
+      ;;           f32.const 0.001 f32.mul
+      ;;           f32.const 0 f32.max
+      ;;           f32.const 1 f32.min
+      ;;           call $blend_color
+      ;;             ))
+
+      ;;       i32.const 0xFF000000
+      ;;       i32.or
+
+      ;;       ;; ;; motion blur
+      ;;       ;; local.get $i
+      ;;       ;; i32.const 4
+      ;;       ;; i32.mul
+      ;;       ;; i32.load
+      ;;       ;; i32.const 0xfefefefe i32.and
+      ;;       ;; i32.const 1
+      ;;       ;; i32.shr_u
+      ;;       ;; i32.or
+
+      ;;       i32.store
+
+      ;;       local.get $i
+      ;;       i32.const 1
+      ;;       i32.add
+      ;;       local.tee $i
+      ;;       i32.const 307200
+      ;;       i32.lt_s
+      ;;       br_if $i_loop)
 
       local.get $credits
       if $do_credits
@@ -3673,6 +4022,8 @@
       (local $shake_y f32)
       (local $shake_dx f32)
       (local $shake_dy f32)
+      (local $bell_pointer i32)
+      (local $was_solved i32)
 
       i32.const 0x0133014 f32.load local.set $shake_x
       i32.const 0x0133018 f32.load local.set $shake_y
@@ -3689,6 +4040,19 @@
             i32.const 0x133008 i32.load
             i32.const 30 i32.gt_s
             (if (then
+                  i32.const 0x150018
+                  local.tee $bell_pointer
+                  i32.const 0x0133010 i32.load ;; count solved cases
+                  i32.popcnt
+                  i32.const 4 i32.add
+                  local.get $max_cases i32.sub
+                  i32.const 0x10 i32.mul
+                  i32.add
+                  local.get $bell_pointer
+                  f32.load
+                  f32.const 0.5 f32.add
+                  f32.store
+
                   i32.const 0x133010
                   i32.const 0x133010 i32.load
                   i32.const 1 local.get $case_number i32.shl
@@ -3703,10 +4067,29 @@
                   (if (then
                         i32.const 0x133004
                         i32.const 0x133004 i32.load
+                        local.tee $was_solved
                         i32.const 1 local.get $i i32.shl i32.or
-                        i32.store))
+                        i32.store
+
+                        local.get $was_solved
+                        i32.const 1 local.get $i i32.shl i32.and
+                        (if (then)
+                          (else
+                            i32.const 0x150088
+                            i32.const 0x150088
+                            f32.load
+                            f32.const 0.5 f32.add
+                            f32.store
+                            ))
+                        ))
                   )
               (else
+                i32.const 0x150108
+                i32.const 0x150108
+                f32.load
+                f32.const 10.5 f32.add
+                f32.store
+
                 i32.const 0x0133010 i32.const 0 i32.store
 
                 local.get $shake_dx call $randf_s f32.const 5.0 f32.mul f32.add local.set $shake_dx
@@ -3789,6 +4172,7 @@
       (local $shake_y f32)
       (local $shake_dx f32)
       (local $shake_dy f32)
+      (local $bell_pointer i32)
 
       i32.const 0x0134014 f32.load local.set $shake_x
       i32.const 0x0134018 f32.load local.set $shake_y
@@ -3805,6 +4189,19 @@
             i32.const 0x134008 i32.load
             i32.const 30 i32.gt_s
             (if (then
+                  i32.const 0x150018
+                  local.tee $bell_pointer
+                  i32.const 0x0134010 i32.load ;; count solved cases
+                  i32.popcnt
+                  i32.const 4 i32.add
+                  local.get $max_cases i32.sub
+                  i32.const 0x10 i32.mul
+                  i32.add
+                  local.get $bell_pointer
+                  f32.load
+                  f32.const 0.5 f32.add
+                  f32.store
+
                   i32.const 0x134010
                   i32.const 0x134010 i32.load
                   i32.const 1 local.get $case_number i32.shl
@@ -3817,6 +4214,16 @@
                   i32.xor
                   i32.eqz
                   (if (then
+                        i32.const 0x134004 i32.load
+                        (if (then)
+                          (else
+                            i32.const 0x150088
+                            i32.const 0x150088
+                            f32.load
+                            f32.const 0.5 f32.add
+                            f32.store
+                            ))
+
                         i32.const 0x134004 i32.const 1 i32.store))
                   )
               (else
@@ -4148,6 +4555,13 @@
             f32.const 512.0 f32.const 240.0
             i32.const 3
             call $create_node drop
+
+            i32.const 0x148000
+            f32.const 0.0
+            f32.store
+            i32.const 0x147004
+            f32.const 0.5
+            f32.store
             )
         (else
           ;; set inputs
@@ -4357,6 +4771,13 @@
           ))
       br $ret
       end ;;level10
+      local.get $do_load
+      (if (then
+            call $load_saved_level
+            call $deserialize_solution
+            return
+            ))
+
       end ;; ret
 
       local.get $do_load
@@ -4374,7 +4795,9 @@
 ;;       ;; call $levels
 ;;       ;; i32.const 0x0134024 i32.const 0 i32.store
 ;;       ;; i32.const 0x0134028 i32.const 0 i32.store
-;;       i32.const 0x0134004 i32.const 1 i32.store
+;;       i32.const 0x0134004 i32.const 0 i32.store
+
+;;       i32.const 0x0133004 i32.const 0x3FF i32.store
 ;;       )
 ;; (start $test_setup)
 
