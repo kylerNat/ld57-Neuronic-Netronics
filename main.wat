@@ -6,7 +6,19 @@
 (func $exp (import "js" "exp") (param f32) (result f32))
 (func $f32print (import "js" "print") (param f32))
 (func $i32print (import "js" "print") (param i32))
+(func $f32draw (import "js" "draw_number") (param f32 f32 f32))
+(func $i32draw (import "js" "draw_number") (param i32 f32 f32))
 (func $draw_text (import "js" "draw_text") (param i32 i32 f32 f32))
+
+(func $hash2d (param $x i32) (param $y i32) (result f32)
+      local.get $x
+      local.get $y
+      i32.const 1618 i32.mul
+      i32.add
+      i32.const 1023 i32.and
+      i32.const 4 i32.mul
+      i32.const 0x130800 i32.add
+      f32.load)
 
 (func $randi (result i32) (local i32)
     ;; https://nullprogram.com/blog/2018/07/31/
@@ -150,6 +162,124 @@
 
       )
 
+(func $draw_arrow (param $x f32) (param $y f32) (param $rx f32) (param $ry f32) (param $dir f32) (param $color i32)
+      (local $x_min i32)
+      (local $x_max i32)
+      (local $y_min i32)
+      (local $y_max i32)
+      (local $x_min4 i32)
+      (local $x_max4 i32)
+      (local $iy i32)
+      (local $ix i32)
+      (local $bound v128)
+      (local $vx v128)
+      (local $vy v128)
+      (local $vy0 v128)
+      (local $vx0 v128)
+      (local $ptr_base i32)
+      (local $ptr i32)
+      (local $color4 v128)
+      (local $mask v128)
+
+      v128.const i32x4 0 0 0 0
+      local.get $x local.get $rx f32.sub f32.floor i32.trunc_sat_f32_s i32x4.replace_lane 0
+      local.get $x local.get $rx f32.add f32.ceil i32.trunc_sat_f32_s  i32x4.replace_lane 1
+      local.get $y local.get $ry f32.sub f32.floor i32.trunc_sat_f32_s i32x4.replace_lane 2
+      local.get $y local.get $ry f32.add f32.ceil i32.trunc_sat_f32_s  i32x4.replace_lane 3
+
+      v128.const i32x4 0 0 0 0 i32x4.max_s v128.const i32x4 639 639 479 479 i32x4.min_s
+      local.tee $bound i32x4.extract_lane 0 local.set $x_min
+      local.get $bound i32x4.extract_lane 1 local.set $x_max
+      local.get $bound i32x4.extract_lane 2 local.set $y_min
+      local.get $bound i32x4.extract_lane 3 local.set $y_max
+
+      local.get $color i32x4.splat local.set $color4
+
+      local.get $y f32x4.splat i32x4.trunc_sat_f32x4_s local.set $vy0
+      local.get $x local.get $rx local.get $dir f32.mul f32.add f32x4.splat i32x4.trunc_sat_f32x4_s local.set $vx0
+
+      local.get $x_min
+      local.get $x_max
+      i32.lt_s
+      local.get $y_min
+      local.tee $iy
+      local.get $y_max
+      i32.lt_s
+      i32.and
+      if $nonzero
+      (loop $y_loop
+            local.get $iy
+            i32.const 2560 i32.mul
+            local.set $ptr_base
+
+            local.get $iy i32x4.splat
+            local.get $vy0 i32x4.sub
+            i32x4.abs
+            local.set $vy
+
+            local.get $x_min
+            i32.const 0xFFFF_FFFC
+            i32.and
+            local.set $ix
+            (loop $x_loop
+                  local.get $ix i32x4.splat
+                  v128.const i32x4 0 1 2 3 i32x4.add
+                  local.tee $vx
+                  local.get $x_min i32x4.splat
+                  i32x4.gt_s
+
+                  local.get $vx
+                  local.get $x_max i32x4.splat
+                  i32x4.le_s
+
+                  local.get $vy
+                  local.get $vx
+                  local.get $vx0
+                  i32x4.sub
+                  i32x4.abs
+                  i32x4.lt_s
+                  v128.and
+
+                  v128.and
+                  ;; v128.const i32x4 0xFF 0xFF 0xFF 0xFF
+                  ;; i32x4.mul
+
+                  local.tee $mask
+                  local.get $color4
+                  v128.and
+
+                  ;; get current pixel colors
+                  local.get $ptr_base
+                  local.get $ix i32.const 4 i32.mul
+                  i32.add
+                  local.tee $ptr
+                  v128.load
+                  local.get $mask
+                  v128.andnot
+                  v128.or
+                  local.set $mask
+
+                  local.get $ptr
+                  local.get $mask
+                  v128.store
+
+                  local.get $ix
+                  i32.const 4 i32.add
+                  local.tee $ix
+                  local.get $x_max
+                  i32.le_s
+                  br_if $x_loop)
+
+            local.get $iy
+            i32.const 1 i32.add
+            local.tee $iy
+            local.get $y_max
+            i32.le_s
+            br_if $y_loop)
+      end
+
+      )
+
 (func $draw_circle (param $x f32) (param $y f32) (param $r f32) (param $color i32)
       (local $x_min i32)
       (local $x_max i32)
@@ -167,6 +297,12 @@
       (local $rsq v128)
       (local $color4 v128)
       (local $mask v128)
+      (local $scale f32)
+
+      i32.const 0x130810 f32.load local.set $scale
+      local.get $x i32.const 0x130808 f32.load f32.add local.get $scale f32.mul local.set $x
+      local.get $y i32.const 0x13080c f32.load f32.add local.get $scale f32.mul local.set $y
+      local.get $r local.get $scale f32.mul local.set $r
 
       local.get $x f32x4.splat local.set $vx0
       local.get $y f32x4.splat local.set $vy0
@@ -221,7 +357,21 @@
                   f32x4.mul
                   local.get $vysq
                   f32x4.add
+                  ;; call $randf_s
+                  ;; f32.const 100.0 f32.mul
+                  ;; f32x4.splat
+                  ;; f32x4.add
                   local.get $rsq
+
+                  ;; v128.const i32x4 0 0 0 0
+                  ;; call $randf f32x4.replace_lane 0
+                  ;; call $randf f32x4.replace_lane 1
+                  ;; call $randf f32x4.replace_lane 2
+                  ;; call $randf f32x4.replace_lane 3
+                  ;; v128.const f32x4 0.5 0.5 0.5 0.5 f32x4.mul
+                  ;; v128.const f32x4 0.5 0.5 0.5 0.5 f32x4.add
+                  ;; f32x4.mul
+
                   f32x4.lt
 
                   local.tee $mask
@@ -260,6 +410,549 @@
 
       )
 
+(func $draw_ring (param $x f32) (param $y f32) (param $ro f32) (param $ri f32) (param $color i32)
+      (local $x_min i32)
+      (local $x_max i32)
+      (local $y_min i32)
+      (local $y_max i32)
+      (local $iy i32)
+      (local $ix i32)
+      (local $bound v128)
+      (local $vx v128)
+      (local $vysq v128)
+      (local $vx0 v128)
+      (local $vy0 v128)
+      (local $ptr_base i32)
+      (local $ptr i32)
+      (local $rosq v128)
+      (local $risq v128)
+      (local $dsq v128)
+      (local $color4 v128)
+      (local $mask v128)
+      (local $scale f32)
+
+      i32.const 0x130810 f32.load local.set $scale
+      local.get $x i32.const 0x130808 f32.load f32.add local.get $scale f32.mul local.set $x
+      local.get $y i32.const 0x13080c f32.load f32.add local.get $scale f32.mul local.set $y
+      local.get $ri local.get $scale f32.mul local.set $ri
+      local.get $ro local.get $scale f32.mul local.set $ro
+
+      local.get $x f32x4.splat local.set $vx0
+      local.get $y f32x4.splat local.set $vy0
+
+      v128.const i32x4 0 0 0 0
+      local.get $x local.get $ro f32.sub f32.floor i32.trunc_sat_f32_s i32x4.replace_lane 0
+      local.get $x local.get $ro f32.add f32.ceil i32.trunc_sat_f32_s  i32x4.replace_lane 1
+      local.get $y local.get $ro f32.sub f32.floor i32.trunc_sat_f32_s i32x4.replace_lane 2
+      local.get $y local.get $ro f32.add f32.ceil i32.trunc_sat_f32_s  i32x4.replace_lane 3
+
+      v128.const i32x4 0 0 0 0 i32x4.max_s v128.const i32x4 639 639 479 479 i32x4.min_s
+      local.tee $bound i32x4.extract_lane 0 local.set $x_min
+      local.get $bound i32x4.extract_lane 1 local.set $x_max
+      local.get $bound i32x4.extract_lane 2 local.set $y_min
+      local.get $bound i32x4.extract_lane 3 local.set $y_max
+
+      local.get $ro local.get $ro f32.mul f32x4.splat local.set $rosq
+      local.get $ri local.get $ri f32.mul f32x4.splat local.set $risq
+
+      local.get $color i32x4.splat local.set $color4
+
+      local.get $x_min
+      local.get $x_max
+      i32.lt_s
+      local.get $y_min
+      local.tee $iy
+      local.get $y_max
+      i32.lt_s
+      i32.and
+      local.get $x_min
+      i32.const 0xFFFF_FFFC
+      i32.and
+      local.set $x_min
+      if $nonzero
+      (loop $y_loop
+            local.get $iy
+            i32.const 2560 i32.mul
+            local.set $ptr_base
+            local.get $iy i32x4.splat f32x4.convert_i32x4_s
+            local.get $vy0 f32x4.sub
+            local.tee $vysq
+            local.get $vysq
+            f32x4.mul
+            local.set $vysq
+            local.get $x_min local.set $ix
+            (loop $x_loop
+                  local.get $ix i32x4.splat
+                  v128.const i32x4 0 1 2 3 i32x4.add
+                  f32x4.convert_i32x4_s
+                  local.get $vx0 f32x4.sub
+                  local.tee $vx
+                  local.get $vx
+                  f32x4.mul
+                  local.get $vysq
+                  f32x4.add
+                  local.tee $dsq
+                  local.get $rosq
+                  f32x4.lt
+
+                  local.get $dsq
+                  local.get $risq
+                  f32x4.gt
+                  v128.and
+
+                  local.tee $mask
+                  local.get $color4
+                  v128.and
+
+                  ;; get current pixel colors
+                  local.get $ptr_base
+                  local.get $ix i32.const 4 i32.mul
+                  i32.add
+                  local.tee $ptr
+                  v128.load
+                  local.get $mask
+                  v128.andnot
+                  v128.or
+                  local.set $mask
+
+                  local.get $ptr
+                  local.get $mask
+                  v128.store
+
+                  local.get $ix
+                  i32.const 4 i32.add
+                  local.tee $ix
+                  local.get $x_max
+                  i32.le_s
+                  br_if $x_loop)
+
+            local.get $iy
+            i32.const 1 i32.add
+            local.tee $iy
+            local.get $y_max
+            i32.le_s
+            br_if $y_loop)
+      end
+
+      )
+
+(func $draw_line
+      (param $xa f32) (param $ya f32)
+      (param $xb f32) (param $yb f32)
+      (param $r f32) (param $color i32)
+      (local $x_min i32)
+      (local $x_max i32)
+      (local $y_min i32)
+      (local $y_max i32)
+      (local $iy i32)
+      (local $ix i32)
+      (local $bound v128)
+      (local $vx v128)
+      (local $vy v128)
+      (local $rx v128)
+      (local $ry v128)
+      (local $vx0 v128)
+      (local $vy0 v128)
+      (local $dot v128)
+      (local $dx v128)
+      (local $dy v128)
+      (local $len v128)
+      (local $invlen v128)
+      (local $ptr_base i32)
+      (local $ptr i32)
+      (local $rsq v128)
+      (local $color4 v128)
+      (local $mask v128)
+      (local $scale f32)
+
+      i32.const 0x130810 f32.load local.set $scale
+      local.get $xa i32.const 0x130808 f32.load f32.add local.get $scale f32.mul local.set $xa
+      local.get $ya i32.const 0x13080c f32.load f32.add local.get $scale f32.mul local.set $ya
+      local.get $xb i32.const 0x130808 f32.load f32.add local.get $scale f32.mul local.set $xb
+      local.get $yb i32.const 0x13080c f32.load f32.add local.get $scale f32.mul local.set $yb
+      local.get $r local.get $scale f32.mul local.set $r
+
+
+      local.get $xa f32x4.splat local.set $vx0
+      local.get $ya f32x4.splat local.set $vy0
+
+      local.get $xb local.get $xa f32.sub f32x4.splat local.set $dx
+      local.get $yb local.get $ya f32.sub f32x4.splat local.set $dy
+
+      v128.const f32x4 1 1 1 1
+      local.get $dx local.get $dx f32x4.mul
+      local.get $dy local.get $dy f32x4.mul
+      f32x4.add
+      f32x4.sqrt
+      local.tee $len
+      f32x4.div
+      local.tee $invlen local.get $dx f32x4.mul local.set $dx
+      local.get $invlen local.get $dy f32x4.mul local.set $dy
+
+      v128.const i32x4 0 0 0 0
+      local.get $xa local.get $xb f32.min local.get $r f32.sub f32.floor i32.trunc_sat_f32_s i32x4.replace_lane 0
+      local.get $xa local.get $xb f32.max local.get $r f32.add f32.ceil i32.trunc_sat_f32_s  i32x4.replace_lane 1
+      local.get $ya local.get $yb f32.min local.get $r f32.sub f32.floor i32.trunc_sat_f32_s i32x4.replace_lane 2
+      local.get $ya local.get $yb f32.max local.get $r f32.add f32.ceil i32.trunc_sat_f32_s  i32x4.replace_lane 3
+
+      v128.const i32x4 0 0 0 0 i32x4.max_s v128.const i32x4 639 639 479 479 i32x4.min_s
+      local.tee $bound i32x4.extract_lane 0 local.set $x_min
+      local.get $bound i32x4.extract_lane 1 local.set $x_max
+      local.get $bound i32x4.extract_lane 2 local.set $y_min
+      local.get $bound i32x4.extract_lane 3 local.set $y_max
+
+      local.get $r local.get $r f32.mul f32x4.splat local.set $rsq
+
+      local.get $color i32x4.splat local.set $color4
+
+      local.get $x_min
+      local.get $x_max
+      i32.lt_s
+      local.get $y_min
+      local.tee $iy
+      local.get $y_max
+      i32.lt_s
+      i32.and
+      local.get $x_min
+      i32.const 0xFFFF_FFFC
+      i32.and
+      local.set $x_min
+      if $nonzero
+      (loop $y_loop
+            local.get $iy
+            i32.const 2560 i32.mul
+            local.set $ptr_base
+            local.get $iy i32x4.splat f32x4.convert_i32x4_s
+            local.get $vy0 f32x4.sub
+            local.set $vy
+            local.get $x_min local.set $ix
+            (loop $x_loop
+                  local.get $ix i32x4.splat
+                  v128.const i32x4 0 1 2 3 i32x4.add
+                  f32x4.convert_i32x4_s
+                  local.get $vx0 f32x4.sub
+
+                  local.tee $vx local.get $dx f32x4.mul
+                  local.get $vy local.get $dy f32x4.mul
+                  f32x4.add
+                  v128.const f32x4 0 0 0 0 f32x4.max
+                  local.get $len f32x4.min
+                  local.set $dot
+
+                  local.get $vx
+                  local.get $dot local.get $dx f32x4.mul
+                  f32x4.sub
+                  local.set $rx
+
+                  local.get $vy
+                  local.get $dot local.get $dy f32x4.mul
+                  f32x4.sub
+                  local.set $ry
+
+                  local.get $rx local.get $rx f32x4.mul
+                  local.get $ry local.get $ry f32x4.mul
+                  f32x4.add
+                  local.get $rsq
+
+                  f32x4.lt
+
+                  local.tee $mask
+                  local.get $color4
+                  v128.and
+
+                  ;; get current pixel colors
+                  local.get $ptr_base
+                  local.get $ix i32.const 4 i32.mul
+                  i32.add
+                  local.tee $ptr
+                  v128.load
+                  local.get $mask
+                  v128.andnot
+                  v128.or
+                  local.set $mask
+
+                  local.get $ptr
+                  local.get $mask
+                  v128.store
+
+                  local.get $ix
+                  i32.const 4 i32.add
+                  local.tee $ix
+                  local.get $x_max
+                  i32.le_s
+                  br_if $x_loop)
+
+            local.get $iy
+            i32.const 1 i32.add
+            local.tee $iy
+            local.get $y_max
+            i32.le_s
+            br_if $y_loop)
+      end
+      )
+
+(func $draw_link_line
+      (param $xa f32) (param $ya f32)
+      (param $xb f32) (param $yb f32)
+      (param $r f32) (param $color i32)
+      (local $x_min i32)
+      (local $x_max i32)
+      (local $y_min i32)
+      (local $y_max i32)
+      (local $iy i32)
+      (local $ix i32)
+      (local $bound v128)
+      (local $vx v128)
+      (local $vy v128)
+      (local $rx v128)
+      (local $ry v128)
+      (local $vx0 v128)
+      (local $vy0 v128)
+      (local $dot v128)
+      (local $dx v128)
+      (local $dy v128)
+      (local $len v128)
+      (local $invlen v128)
+      (local $ptr_base i32)
+      (local $ptr i32)
+      (local $rsq v128)
+      (local $color4 v128)
+      (local $mask v128)
+      (local $scale f32)
+
+      i32.const 0x130810 f32.load local.set $scale
+      local.get $xa i32.const 0x130808 f32.load f32.add local.get $scale f32.mul local.set $xa
+      local.get $ya i32.const 0x13080c f32.load f32.add local.get $scale f32.mul local.set $ya
+      local.get $xb i32.const 0x130808 f32.load f32.add local.get $scale f32.mul local.set $xb
+      local.get $yb i32.const 0x13080c f32.load f32.add local.get $scale f32.mul local.set $yb
+      local.get $r local.get $scale f32.mul local.set $r
+
+
+      local.get $xa f32x4.splat local.set $vx0
+      local.get $ya f32x4.splat local.set $vy0
+
+      local.get $xb local.get $xa f32.sub f32x4.splat local.set $dx
+      local.get $yb local.get $ya f32.sub f32x4.splat local.set $dy
+
+      v128.const f32x4 1 1 1 1
+      local.get $dx local.get $dx f32x4.mul
+      local.get $dy local.get $dy f32x4.mul
+      f32x4.add
+      f32x4.sqrt
+      local.tee $len
+      f32x4.div
+      local.tee $invlen local.get $dx f32x4.mul local.set $dx
+      local.get $invlen local.get $dy f32x4.mul local.set $dy
+
+      v128.const i32x4 0 0 0 0
+      local.get $xa local.get $xb f32.min local.get $r f32.sub f32.floor i32.trunc_sat_f32_s i32x4.replace_lane 0
+      local.get $xa local.get $xb f32.max local.get $r f32.add f32.ceil i32.trunc_sat_f32_s  i32x4.replace_lane 1
+      local.get $ya local.get $yb f32.min local.get $r f32.sub f32.floor i32.trunc_sat_f32_s i32x4.replace_lane 2
+      local.get $ya local.get $yb f32.max local.get $r f32.add f32.ceil i32.trunc_sat_f32_s  i32x4.replace_lane 3
+
+      v128.const i32x4 0 0 0 0 i32x4.max_s v128.const i32x4 639 639 479 479 i32x4.min_s
+      local.tee $bound i32x4.extract_lane 0 local.set $x_min
+      local.get $bound i32x4.extract_lane 1 local.set $x_max
+      local.get $bound i32x4.extract_lane 2 local.set $y_min
+      local.get $bound i32x4.extract_lane 3 local.set $y_max
+
+      local.get $r local.get $r f32.mul f32x4.splat local.set $rsq
+
+      local.get $color i32x4.splat local.set $color4
+
+      local.get $x_min
+      local.get $x_max
+      i32.lt_s
+      local.get $y_min
+      local.tee $iy
+      local.get $y_max
+      i32.lt_s
+      i32.and
+      local.get $x_min
+      i32.const 0xFFFF_FFFC
+      i32.and
+      local.set $x_min
+      if $nonzero
+      (loop $y_loop
+            local.get $iy
+            i32.const 2560 i32.mul
+            local.set $ptr_base
+            local.get $iy i32x4.splat f32x4.convert_i32x4_s
+            local.get $vy0 f32x4.sub
+            local.set $vy
+            local.get $x_min local.set $ix
+            (loop $x_loop
+                  local.get $ix i32x4.splat
+                  v128.const i32x4 0 1 2 3 i32x4.add
+                  f32x4.convert_i32x4_s
+                  local.get $vx0 f32x4.sub
+
+                  local.tee $vx local.get $dx f32x4.mul
+                  local.get $vy local.get $dy f32x4.mul
+                  f32x4.add
+                  v128.const f32x4 0 0 0 0 f32x4.max
+                  local.get $len f32x4.min
+                  local.set $dot
+
+                  local.get $vx
+                  local.get $dot local.get $dx f32x4.mul
+                  f32x4.sub
+                  local.set $rx
+
+                  local.get $vy
+                  local.get $dot local.get $dy f32x4.mul
+                  f32x4.sub
+                  local.set $ry
+
+                  local.get $rx local.get $rx f32x4.mul
+                  local.get $ry local.get $ry f32x4.mul
+                  f32x4.add
+                  local.get $rsq
+
+                  ;; middle thining
+                  local.get $dot local.get $invlen f32x4.mul
+                  v128.const f32x4 0.5 0.5 0.5 0.5 f32x4.sub
+                  f32x4.abs
+                  v128.const f32x4 0.05 0.05 0.05 0.05 f32x4.add
+                  f32x4.mul
+
+                  ;; v128.const i32x4 0 0 0 0
+                  ;; call $randf_s f32x4.replace_lane 0
+                  ;; call $randf_s f32x4.replace_lane 1
+                  ;; call $randf_s f32x4.replace_lane 2
+                  ;; call $randf_s f32x4.replace_lane 3
+                  ;; v128.const f32x4 4 4 4 4 f32x4.mul
+                  ;; f32x4.add
+
+                  f32x4.lt
+
+                  local.tee $mask
+                  local.get $color4
+                  v128.and
+
+                  ;; get current pixel colors
+                  local.get $ptr_base
+                  local.get $ix i32.const 4 i32.mul
+                  i32.add
+                  local.tee $ptr
+                  v128.load
+                  local.get $mask
+                  v128.andnot
+                  v128.or
+                  local.set $mask
+
+                  local.get $ptr
+                  local.get $mask
+                  v128.store
+
+                  local.get $ix
+                  i32.const 4 i32.add
+                  local.tee $ix
+                  local.get $x_max
+                  i32.le_s
+                  br_if $x_loop)
+
+            local.get $iy
+            i32.const 1 i32.add
+            local.tee $iy
+            local.get $y_max
+            i32.le_s
+            br_if $y_loop)
+      end
+
+      )
+
+(func $draw_link
+      (param $x1 f32) (param $y1 f32)
+      (param $x2 f32) (param $y2 f32)
+      (param $t f32) (param $r f32) (param $color i32)
+      (param $sign i32)
+
+      local.get $t local.get $t
+      f32.floor f32.sub
+      local.set $t
+
+      local.get $x1 local.get $y1
+      local.get $x2 local.get $y2
+      local.get $r f32.const 0.8 f32.mul
+      local.get $t
+      f32.const 3.14159265358979323846264338327950 f32.mul
+      call $sin
+      f32.add
+      local.get $color
+      call $draw_link_line
+
+      local.get $x1 local.get $x2 local.get $t call $lerp
+      local.get $y1 local.get $y2 local.get $t call $lerp
+      local.get $r
+      local.get $sign
+      (if (param f32 f32 f32)
+        (then
+          local.get $color
+          call $draw_circle)
+        (else
+          local.get $r f32.const 0.8 f32.mul
+          i32.const 0xFF_70_90_90
+          call $draw_ring))
+
+      local.get $t
+      f32.const 0.25 f32.add
+      local.tee $t local.get $t
+      f32.floor f32.sub
+      local.set $t
+
+      local.get $x1 local.get $x2 local.get $t call $lerp
+      local.get $y1 local.get $y2 local.get $t call $lerp
+      local.get $r
+      local.get $sign
+      (if (param f32 f32 f32)
+        (then
+          local.get $color
+          call $draw_circle)
+        (else
+          local.get $r f32.const 0.8 f32.mul
+          i32.const 0xFF_70_90_90
+          call $draw_ring))
+
+      local.get $t
+      f32.const 0.25 f32.add
+      local.tee $t local.get $t
+      f32.floor f32.sub
+      local.set $t
+
+      local.get $x1 local.get $x2 local.get $t call $lerp
+      local.get $y1 local.get $y2 local.get $t call $lerp
+      local.get $r
+      local.get $sign
+      (if (param f32 f32 f32)
+        (then
+          local.get $color
+          call $draw_circle)
+        (else
+          local.get $r f32.const 0.8 f32.mul
+          i32.const 0xFF_70_90_90
+          call $draw_ring))
+
+      local.get $t
+      f32.const 0.25 f32.add
+      local.tee $t local.get $t
+      f32.floor f32.sub
+      local.set $t
+
+      local.get $x1 local.get $x2 local.get $t call $lerp
+      local.get $y1 local.get $y2 local.get $t call $lerp
+      local.get $r
+      local.get $sign
+      (if (param f32 f32 f32)
+        (then
+          local.get $color
+          call $draw_circle)
+        (else
+          local.get $r f32.const 0.8 f32.mul
+          i32.const 0xFF_70_90_90
+          call $draw_ring))
+      )
+
 (func $update_particles
       (local $n_particles i32)
       (local $i i32)
@@ -274,15 +967,14 @@
       (local $rx v128)
       (local $ry v128)
       (local $rsq v128)
+      (local $scale f32)
       i32.const 0x130FFC ;; n_particles
       i32.load
       local.set $n_particles
 
-      i32.const 0x12c000 f32.load
-      local.set $mx
-
-      i32.const 0x12c004 f32.load
-      local.set $my
+      i32.const 0x130810 f32.load local.set $scale
+      i32.const 0x12c000 f32.load local.get $scale f32.div local.set $mx
+      i32.const 0x12c004 f32.load local.get $scale f32.div local.set $my
 
       i32.const 0x12c008 i32.load
       i32.const 1 i32.and
@@ -478,6 +1170,960 @@
       end
       )
 
+(func $is_linked (param $a i32) (param $b i32) (result i32)
+      (local $n_links i32)
+      (local $i i32)
+      (local $i4 i32)
+      (local $A i32)
+      (local $B i32)
+
+      i32.const 0x132010 i32.load local.set $n_links
+
+      local.get $n_links
+      local.set $i
+      block $break
+      (loop $link_loop
+            local.get $i
+            i32.eqz
+            br_if $break
+
+            local.get $i
+            i32.const 1 i32.sub
+            local.tee $i
+            i32.const 4 i32.mul
+            local.set $i4
+
+            i32.const 0x160000 local.get $i4 i32.add i32.load local.set $A
+            i32.const 0x161000 local.get $i4 i32.add i32.load local.set $B
+
+            local.get $a local.get $A i32.eq
+            local.get $b local.get $B i32.eq
+            i32.and
+
+            local.get $a local.get $B i32.eq
+            local.get $b local.get $A i32.eq
+            i32.and
+
+            i32.or
+            (if (then i32.const 1 return))
+
+            br $link_loop)
+      end
+      i32.const 0)
+
+(func $update_links
+      (local $n_links i32)
+      (local $clicked_link i32)
+      (local $hovered_link i32)
+      (local $clicked_node i32)
+      (local $temp f32)
+      (local $i i32)
+      (local $i4 i32)
+      (local $a i32)
+      (local $a4 i32)
+      (local $b i32)
+      (local $b4 i32)
+      (local $strength f32)
+      (local $phase f32)
+      (local $r f32)
+      (local $dr f32)
+      (local $activation f32)
+      (local $target f32)
+      (local $flow_dir i32)
+
+      (local $ax f32)
+      (local $ay f32)
+      (local $bx f32)
+      (local $by f32)
+      (local $adx f32)
+      (local $ady f32)
+      (local $bdx f32)
+      (local $bdy f32)
+
+      (local $dx f32)
+      (local $dy f32)
+      (local $fx f32)
+      (local $fy f32)
+      (local $f f32)
+      (local $d f32)
+      (local $invr f32)
+      (local $dot f32)
+
+      (local $mx f32)
+      (local $my f32)
+      (local $clicked i32)
+      (local $clicking i32)
+      (local $right_clicked i32)
+
+      (local $rmx f32)
+      (local $rmy f32)
+      (local $scale f32)
+
+      i32.const 0x132010 i32.load local.set $n_links
+
+      i32.const 0x132004 i32.load local.set $clicked_node
+      i32.const 0x132014 i32.load local.set $clicked_link
+
+      i32.const 0x130810 f32.load local.set $scale
+      i32.const 0x12c000 f32.load local.get $scale f32.div i32.const 0x130808 f32.load f32.sub local.set $mx
+      i32.const 0x12c004 f32.load local.get $scale f32.div i32.const 0x13080c f32.load f32.sub local.set $my
+
+      i32.const 0x12c008 i32.load
+      local.tee $clicking
+      i32.const 1 i32.and
+      local.set $clicked
+
+      local.get $clicking
+      (if (then) (else i32.const 0 local.set $clicked_link))
+
+      i32.const 0x12c00c i32.load
+      i32.const 1 i32.and
+      local.set $right_clicked
+
+      local.get $n_links
+      local.set $i
+      block $break
+      (loop $link_loop
+            local.get $i
+            i32.eqz
+            br_if $break
+
+            local.get $i
+            i32.const 1 i32.sub
+            local.tee $i
+            i32.const 4 i32.mul
+            local.set $i4
+
+            i32.const 0x160000 local.get $i4 i32.add i32.load local.set $a
+            i32.const 0x161000 local.get $i4 i32.add i32.load local.set $b
+            i32.const 0x162000 local.get $i4 i32.add f32.load local.set $strength
+            i32.const 0x163000 local.get $i4 i32.add f32.load local.set $r
+            i32.const 0x164000 local.get $i4 i32.add f32.load local.set $dr
+            i32.const 0x165000 local.get $i4 i32.add f32.load local.set $phase
+
+            local.get $a
+            i32.const 4 i32.mul
+            local.set $a4
+
+            local.get $b
+            i32.const 4 i32.mul
+            local.set $b4
+
+            i32.const 0x140000 local.get $a4 i32.add f32.load local.set $ax
+            i32.const 0x141000 local.get $a4 i32.add f32.load local.set $ay
+            i32.const 0x142000 local.get $a4 i32.add f32.load local.set $adx
+            i32.const 0x143000 local.get $a4 i32.add f32.load local.set $ady
+
+            i32.const 0x140000 local.get $b4 i32.add f32.load local.set $bx
+            i32.const 0x141000 local.get $b4 i32.add f32.load local.set $by
+            i32.const 0x142000 local.get $b4 i32.add f32.load local.set $bdx
+            i32.const 0x143000 local.get $b4 i32.add f32.load local.set $bdy
+
+            local.get $bx local.get $ax f32.sub local.set $dx
+            local.get $by local.get $ay f32.sub local.set $dy
+
+            f32.const 1
+            local.get $dx local.get $dx f32.mul
+            local.get $dy local.get $dy f32.mul
+            f32.add
+            f32.sqrt
+            local.tee $d
+            f32.const 1 f32.max
+            f32.div
+            local.tee $invr
+            f32.const -128 f32.mul
+            f32.const 1.0 f32.add
+            f32.const 0.01 f32.mul
+            local.set $f
+
+            local.get $dx local.get $f f32.mul local.set $fx
+            local.get $dy local.get $f f32.mul local.set $fy
+
+            local.get $adx local.get $fx f32.add local.set $adx
+            local.get $ady local.get $fy f32.add local.set $ady
+
+            local.get $bdx local.get $fx f32.sub local.set $bdx
+            local.get $bdy local.get $fy f32.sub local.set $bdy
+
+            i32.const 0x142000 local.get $a4 i32.add local.get $adx f32.store
+            i32.const 0x143000 local.get $a4 i32.add local.get $ady f32.store
+            i32.const 0x142000 local.get $b4 i32.add local.get $bdx f32.store
+            i32.const 0x143000 local.get $b4 i32.add local.get $bdy f32.store
+
+            ;; local.get $strength f32.const 0 f32.gt local.set $flow_dir
+            i32.const 1 local.set $flow_dir
+
+            i32.const 0x148000
+            local.get $a4 local.get $b4 local.get $flow_dir select
+            i32.add f32.load
+            local.get $strength f32.mul
+            local.set $activation
+
+            i32.const 0x149000 local.get $b4 local.get $a4 local.get $flow_dir select i32.add
+            i32.const 0x149000 local.get $b4 local.get $a4 local.get $flow_dir select i32.add
+            f32.load local.get $activation f32.add f32.store
+
+            f32.const 0.0078125 local.get $strength f32.abs f32.mul
+            local.get $phase f32.add local.set $phase
+
+            local.get $ax local.get $ay
+            local.get $bx local.get $by
+            local.get $phase
+            local.get $r local.get $strength f32.abs f32.mul
+            i32.const 0xFFC0705F
+            local.get $strength f32.const 0 f32.gt
+            call $draw_link
+
+            local.get $dx local.get $invr f32.mul local.set $dx
+            local.get $dy local.get $invr f32.mul local.set $dy
+
+            local.get $strength
+            local.get $d f32.const 0.5 f32.mul f32.const 24 f32.sub
+            f32.mul
+            local.set $strength
+
+            local.get $d f32.const 0.5 f32.mul local.set $f
+            local.get $ax local.get $dx local.get $f local.get $strength f32.add f32.mul f32.add
+            local.get $ay local.get $dy local.get $f local.get $strength f32.add f32.mul f32.add
+            local.get $r f32.const 1.5 f32.mul
+            i32.const 0xFFFFFFFF
+            call $draw_circle
+
+            local.get $dx local.get $mx local.get $ax f32.sub local.tee $rmx f32.mul
+            local.get $dy local.get $my local.get $ay f32.sub local.tee $rmy f32.mul
+            f32.add
+            f32.const 32 f32.max
+            local.get $d f32.const 32 f32.sub f32.min
+            local.set $dot
+
+            local.get $rmx local.get $dx local.get $dot f32.mul f32.sub local.tee $rmx local.get $rmx f32.mul
+            local.get $rmy local.get $dy local.get $dot f32.mul f32.sub local.tee $rmy local.get $rmy f32.mul
+            f32.add
+
+            f32.const 100
+
+            f32.lt
+            local.get $clicked_node i32.eqz i32.and
+            local.get $clicked_link i32.eqz i32.and
+            (if (then
+                  local.get $dr f32.const 0.1 f32.add local.set $dr
+
+                  local.get $i
+                  i32.const 1 i32.add
+                  local.set $hovered_link
+
+                  local.get $right_clicked
+                  (if (then
+                        local.get $i
+                        call $delete_link
+                        br $link_loop
+                        ))
+                  ))
+
+            local.get $clicked_link local.get $i i32.const 1 i32.add i32.eq
+            (if  (then
+                   local.get $dot
+                   f32.const 32 f32.sub
+                   local.get $d f32.const 64 f32.sub f32.div
+                   f32.const 2 f32.mul
+                   f32.const 1 f32.sub
+                   local.set $strength
+                   i32.const 0x162000 local.get $i4 i32.add local.get $strength f32.store
+                   ))
+
+            local.get $dr
+            f32.const 0.95 f32.mul
+            f32.const 5 local.get $r f32.sub f32.const 0.05 f32.mul
+            f32.add
+            local.set $dr
+
+            local.get $r local.get $dr f32.add local.set $r
+
+            i32.const 0x163000 local.get $i4 i32.add local.get $r f32.store
+            i32.const 0x164000 local.get $i4 i32.add local.get $dr f32.store
+            i32.const 0x165000 local.get $i4 i32.add local.get $phase f32.store
+
+            br $link_loop)
+
+
+
+      local.get $clicked
+      local.get $hovered_link
+      i32.and
+      (if (then
+            local.get $i
+            i32.const 1 i32.add
+            local.set $clicked_link
+            ))
+      i32.const 0x132014 local.get $clicked_link i32.store
+      i32.const 0x132018 local.get $hovered_link i32.store
+      end
+      )
+
+(func $delete_link (param $i i32)
+      (local $n_links i32)
+      (local $i4 i32)
+      (local $j4 i32)
+
+      local.get $i
+      i32.const 4 i32.mul
+      local.set $i4
+
+      i32.const 0x0132010 i32.load
+      i32.const 1 i32.sub
+      local.tee $n_links
+      i32.const 4 i32.mul
+      local.set $j4
+      i32.const 0x160000 local.get $i4 i32.add i32.const 0x160000 local.get $j4 i32.add i32.load i32.store
+      i32.const 0x161000 local.get $i4 i32.add i32.const 0x161000 local.get $j4 i32.add i32.load i32.store
+      i32.const 0x162000 local.get $i4 i32.add i32.const 0x162000 local.get $j4 i32.add f32.load f32.store
+      i32.const 0x163000 local.get $i4 i32.add i32.const 0x163000 local.get $j4 i32.add f32.load f32.store
+      i32.const 0x164000 local.get $i4 i32.add i32.const 0x164000 local.get $j4 i32.add f32.load f32.store
+      i32.const 0x165000 local.get $i4 i32.add i32.const 0x165000 local.get $j4 i32.add f32.load f32.store
+
+      i32.const 0x0132010
+      local.get $n_links
+      i32.store
+      )
+
+(func $create_node (param $x f32) (param $y f32) (param $type i32) (result i32)
+      (local $n_nodes i32)
+      (local $i4 i32)
+      i32.const 0x132000 i32.load
+      local.tee $n_nodes
+      i32.const 4 i32.mul
+      local.set $i4
+
+      i32.const 0x140000 local.get $i4 i32.add local.get $x f32.store
+      i32.const 0x141000 local.get $i4 i32.add local.get $y f32.store
+      i32.const 0x142000 local.get $i4 i32.add f32.const 0 f32.store
+      i32.const 0x143000 local.get $i4 i32.add f32.const 0 f32.store
+      i32.const 0x144000 local.get $i4 i32.add f32.const 5 f32.store
+      i32.const 0x145000 local.get $i4 i32.add f32.const 0 f32.store
+      i32.const 0x146000 local.get $i4 i32.add local.get $type i32.store
+      i32.const 0x148000 local.get $i4 i32.add f32.const 0 f32.store
+      i32.const 0x149000 local.get $i4 i32.add f32.const 0 f32.store
+      i32.const 0x132000
+      local.get $n_nodes
+      i32.const 1 i32.add
+      local.tee $n_nodes
+      i32.store
+      local.get $n_nodes
+      )
+
+(func $delete_node (param $i i32)
+      (local $n_nodes i32)
+      (local $n_links i32)
+      (local $l i32)
+      (local $i4 i32)
+      (local $j4 i32)
+      (local $A i32)
+      (local $B i32)
+
+      local.get $i
+      i32.const 4 i32.mul
+      local.set $i4
+
+      i32.const 0x0132000 i32.load
+      i32.const 1 i32.sub
+      local.tee $n_nodes
+      i32.const 4 i32.mul
+      local.set $j4
+      i32.const 0x140000 local.get $i4 i32.add i32.const 0x140000 local.get $j4 i32.add f32.load f32.store
+      i32.const 0x141000 local.get $i4 i32.add i32.const 0x141000 local.get $j4 i32.add f32.load f32.store
+      i32.const 0x142000 local.get $i4 i32.add i32.const 0x142000 local.get $j4 i32.add f32.load f32.store
+      i32.const 0x143000 local.get $i4 i32.add i32.const 0x143000 local.get $j4 i32.add f32.load f32.store
+      i32.const 0x144000 local.get $i4 i32.add i32.const 0x144000 local.get $j4 i32.add f32.load f32.store
+      i32.const 0x145000 local.get $i4 i32.add i32.const 0x145000 local.get $j4 i32.add f32.load f32.store
+
+      i32.const 0x132000
+      local.get $n_nodes
+      i32.store
+
+      i32.const 0x132010 i32.load local.set $n_links
+
+      local.get $n_links
+      local.set $l
+      block $break
+      (loop $link_loop
+            local.get $l
+            i32.eqz
+            br_if $break
+
+            local.get $l
+            i32.const 1 i32.sub
+            local.tee $l
+            i32.const 4 i32.mul
+            local.set $i4
+
+            i32.const 0x160000 local.get $i4 i32.add i32.load local.set $A
+            i32.const 0x161000 local.get $i4 i32.add i32.load local.set $B
+
+            local.get $i local.get $A i32.eq
+            local.get $i local.get $B i32.eq
+            i32.or
+            (if (then
+                  local.get $l
+                  call $delete_link)
+              (else
+                local.get $n_nodes local.get $A i32.eq
+                (if (then
+                      i32.const 0x160000 local.get $i4 i32.add local.get $i i32.store))
+
+                local.get $n_nodes local.get $B i32.eq
+                (if (then
+                      i32.const 0x161000 local.get $i4 i32.add local.get $i i32.store))
+                ))
+
+            br $link_loop)
+      end)
+
+(func $update_nodes
+      (local $n_nodes i32)
+      (local $temp f32)
+      (local $i i32)
+      (local $i4 i32)
+      (local $j i32)
+      (local $j4 i32)
+      (local $l i32)
+      (local $l4 i32)
+      (local $x f32)
+      (local $y f32)
+      (local $dx f32)
+      (local $dy f32)
+      (local $r f32)
+      (local $dr f32)
+
+      (local $nx f32)
+      (local $ny f32)
+      (local $ndx f32)
+      (local $ndy f32)
+      (local $nr f32)
+      (local $ndr f32)
+
+      (local $rx f32)
+      (local $ry f32)
+      (local $mx f32)
+      (local $my f32)
+      (local $msq f32)
+      (local $clicked i32)
+      (local $clicking i32)
+      (local $right_clicked i32)
+      (local $clicked_node i32)
+      (local $clicked_link i32)
+      (local $hovered_link i32)
+      (local $is_clicked_node i32)
+      (local $pending_node i32)
+      (local $best_node i32)
+      (local $best_distsq f32)
+      (local $scale f32)
+      (local $activation f32)
+      (local $target f32)
+      (local $type i32)
+      (local $interactive i32)
+      (local $solved i32)
+
+      i32.const 1 local.set $solved
+
+      i32.const 0x132000 i32.load local.set $n_nodes
+      i32.const 0x132004 i32.load local.set $clicked_node
+      i32.const 0x132008 i32.load local.set $pending_node
+      i32.const 0x132014 i32.load local.set $clicked_link
+      i32.const 0x132018 i32.load local.set $hovered_link
+
+      i32.const 0x130810 f32.load local.set $scale
+      i32.const 0x12c000 f32.load local.get $scale f32.div i32.const 0x130808 f32.load f32.sub local.set $mx
+      i32.const 0x12c004 f32.load local.get $scale f32.div i32.const 0x13080c f32.load f32.sub local.set $my
+
+      i32.const 0x12c008 i32.load
+      local.tee $clicking
+      i32.const 1 i32.and
+      local.set $clicked
+
+      i32.const 0x12c00c i32.load
+      i32.const 1 i32.and
+      local.set $right_clicked
+
+      f32.const 8192.0
+      local.set $best_distsq
+
+      local.get $pending_node
+      i32.eqz
+      (if (then)
+        (else
+          local.get $clicked_node
+          i32.const 1 i32.sub
+          i32.const 4 i32.mul
+          local.set $i4
+
+          local.get $pending_node
+          i32.const 1 i32.sub
+          i32.const 4 i32.mul
+          local.set $j4
+
+          i32.const 0x140000 local.get $i4 i32.add f32.load local.set $x
+          i32.const 0x141000 local.get $i4 i32.add f32.load local.set $y
+
+          i32.const 0x140000 local.get $j4 i32.add f32.load local.set $nx
+          i32.const 0x141000 local.get $j4 i32.add f32.load local.set $ny
+
+          i32.const 0x130804
+          i32.load
+          i32.const 1 i32.and
+          (if (then
+                local.get $nx local.get $ny
+                local.get $x local.get $y
+
+                f32.const 0.0
+                f32.const 5.0
+                i32.const 0xFFC0705F
+                i32.const 1
+                call $draw_link))
+
+          local.get $nx local.get $x f32.sub local.set $rx
+          local.get $ny local.get $y f32.sub local.set $ry
+
+          local.get $rx local.get $rx f32.mul
+          local.get $ry local.get $ry f32.mul
+          f32.add
+
+          f32.const 8192.0
+
+          f32.gt
+          (if (then
+                i32.const 0
+                local.set $pending_node
+                ))
+          ))
+
+      local.get $n_nodes
+      local.tee $i
+      i32.eqz
+      if $nonzero
+      else
+      (loop $node_loop
+            block $skip_if_delete
+            local.get $i
+            i32.const 1
+            i32.sub
+            local.tee $i
+            i32.const 4 i32.mul
+            local.set $i4
+            i32.const 0x140000 local.get $i4 i32.add f32.load local.set $x
+            i32.const 0x141000 local.get $i4 i32.add f32.load local.set $y
+            i32.const 0x142000 local.get $i4 i32.add f32.load local.set $dx
+            i32.const 0x143000 local.get $i4 i32.add f32.load local.set $dy
+            i32.const 0x144000 local.get $i4 i32.add f32.load local.set $r
+            i32.const 0x145000 local.get $i4 i32.add f32.load local.set $dr
+            i32.const 0x146000 local.get $i4 i32.add i32.load local.set $type
+
+            local.get $type i32.const 1 i32.and i32.eqz local.set $interactive
+
+            i32.const 0x147000 local.get $i4 i32.add f32.load local.set $target
+
+            local.get $type i32.const 1 i32.eq
+            (if
+              (then
+                i32.const 0x148000 local.get $i4 i32.add
+                f32.load
+                local.set $activation
+                )
+              (else
+                i32.const 0x148000 local.get $i4 i32.add
+                i32.const 0x149000 local.get $i4 i32.add f32.load
+                f32.const 1 f32.min
+                f32.const -1 f32.max
+                local.tee $activation
+                f32.store
+                ))
+
+            i32.const 0x149000 local.get $i4 i32.add i32.const 0 i32.store
+
+            local.get $interactive
+            (if (then
+                  local.get $x local.get $dx f32.add local.set $x
+                  local.get $y local.get $dy f32.add local.set $y
+                  ))
+
+            local.get $dx f32.const 0.5 f32.mul local.set $dx
+            local.get $dy f32.const 0.5 f32.mul local.set $dy
+
+            local.get $dr
+            f32.const 0.95 f32.mul
+            i32.const 0x130804 i32.load i32.const 0xFFFFFF i32.and f32.convert_i32_s
+            f32.const 0.2 f32.mul call $sin f32.const 0.005 f32.mul f32.add
+            f32.const 16 local.get $r f32.sub f32.const 0.05 f32.mul
+            f32.add
+            local.set $dr
+
+            local.get $r local.get $dr f32.add local.set $r
+
+            local.get $x local.get $mx f32.sub local.set $rx
+            local.get $y local.get $my f32.sub local.set $ry
+            local.get $rx local.get $rx f32.mul
+            local.get $ry local.get $ry f32.mul
+            f32.add
+            local.tee $msq
+            local.get $r local.get $r f32.mul
+            f32.lt
+            local.get $interactive i32.and
+            (if
+              (then
+                local.get $dr f32.const 0.1 f32.add local.set $dr
+
+                local.get $clicked
+                local.get $clicked_node i32.eqz i32.and
+                local.get $clicked_link i32.eqz i32.and
+                (if
+                  (then
+                    local.get $i
+                    i32.const 1 i32.add
+                    local.set $clicked_node
+
+                    local.get $dr f32.const -1.0 f32.add local.set $dr
+                    ))
+                )
+              (else
+                ;; local.get $msq
+                ;; f32.const
+                ;; f32.lt
+                ;; (if
+                ;;   (then
+                ;;     ))
+                ))
+
+            local.get $right_clicked
+            local.get $clicked_node i32.eqz
+            local.get $clicked_link i32.eqz i32.and
+            i32.and
+            local.get $interactive i32.and
+            (if
+              (then
+                local.get $x local.get $mx f32.sub local.set $rx
+                local.get $y local.get $my f32.sub local.set $ry
+                local.get $rx local.get $rx f32.mul
+                local.get $ry local.get $ry f32.mul
+                f32.add
+                local.get $r local.get $r f32.mul
+                f32.lt
+                (if
+                  (then
+                    local.get $i
+                    call $delete_node
+                    br $skip_if_delete
+                    ))
+                ))
+
+            local.get $n_nodes
+            local.tee $j
+            local.get $i
+            i32.const 1 i32.add
+            i32.gt_s
+            if $j_nonzero
+            (loop $lop
+                  local.get $j
+                  i32.const 1
+                  i32.sub
+                  local.tee $j
+                  i32.const 4 i32.mul
+                  local.set $j4
+
+                  i32.const 0x140000 local.get $j4 i32.add f32.load local.set $nx
+                  i32.const 0x141000 local.get $j4 i32.add f32.load local.set $ny
+                  i32.const 0x142000 local.get $j4 i32.add f32.load local.set $ndx
+                  i32.const 0x143000 local.get $j4 i32.add f32.load local.set $ndy
+                  i32.const 0x144000 local.get $j4 i32.add f32.load local.set $nr
+                  i32.const 0x145000 local.get $j4 i32.add f32.load local.set $ndr
+
+                  local.get $nx local.get $x f32.sub local.set $rx
+                  local.get $ny local.get $y f32.sub local.set $ry
+
+                  local.get $r local.get $nr f32.add
+                  local.tee $temp
+                  local.get $temp
+                  f32.mul
+                  local.tee $temp
+
+                  local.get $rx local.get $rx f32.mul
+                  local.get $ry local.get $ry f32.mul
+                  f32.add
+                  local.tee $temp
+
+                  local.get $best_distsq
+                  f32.lt
+
+                  local.get $clicked_node i32.const 1 i32.sub local.get $i i32.eq
+                  local.tee $is_clicked_node
+                  local.get $clicked_node i32.const 1 i32.sub local.get $j i32.eq
+                  i32.or
+
+                  i32.and
+
+                  local.get $i
+                  local.get $j
+                  call $is_linked
+                  i32.eqz
+                  i32.and
+                  (if
+                    (then
+                      local.get $j
+                      local.get $i
+                      local.get $is_clicked_node
+                      select
+                      i32.const 1 i32.add
+                      local.set $pending_node
+
+                      local.get $temp
+                      local.set $best_distsq
+                      ))
+
+                  local.get $temp
+
+                  f32.gt
+                  (if
+                    (then
+                      local.get $r local.get $nr f32.add
+
+                      f32.const 1
+                      local.get $temp
+                      f32.sqrt
+                      f32.div
+
+                      f32.sub
+                      f32.const 0.0002 f32.mul
+                      local.set $temp
+
+                      local.get $rx local.get $temp f32.mul local.set $rx
+                      local.get $ry local.get $temp f32.mul local.set $ry
+
+                      local.get $dx
+                      local.get $rx
+                      f32.sub
+                      local.set $dx
+
+                      local.get $dy
+                      local.get $ry
+                      f32.sub
+                      local.set $dy
+
+                      local.get $ndx
+                      local.get $rx
+                      f32.add
+                      local.set $ndx
+
+                      local.get $ndy
+                      local.get $ry
+                      f32.add
+                      local.set $ndy
+                      ))
+
+                  ;; i32.const 0x140000 local.get $j4 i32.add local.get $nx  f32.store
+                  ;; i32.const 0x141000 local.get $j4 i32.add local.get $ny  f32.store
+                  i32.const 0x142000 local.get $j4 i32.add local.get $ndx f32.store
+                  i32.const 0x143000 local.get $j4 i32.add local.get $ndy f32.store
+                  ;; i32.const 0x144000 local.get $j4 i32.add local.get $nr  f32.store
+                  ;; i32.const 0x145000 local.get $j4 i32.add local.get $ndr f32.store
+
+                  local.get $j
+                  local.get $i
+                  i32.const 1 i32.add
+                  i32.gt_s
+                  br_if $lop)
+            end
+
+            local.get $clicked_node local.get $i i32.const 1 i32.add i32.eq
+            (if
+              (then
+                local.get $mx local.set $x
+                local.get $my local.set $y
+
+                local.get $dr f32.const -0.1 f32.add local.set $dr
+
+                local.get $clicking
+                i32.eqz
+                (if (then
+                      local.get $pending_node
+                      i32.eqz
+                      (if (then)
+                        (else ;; create link
+                          local.get $pending_node i32.const 1 i32.sub local.tee $j
+                          i32.const 4 i32.mul
+                          local.set $j4
+
+                          i32.const 0x146000 local.get $j4 i32.add i32.load local.set $type
+
+                          i32.const 0x132010
+                          i32.const 0x132010 i32.load
+                          local.tee $l
+                          i32.const 1 i32.add
+                          i32.store
+                          local.get $l
+                          i32.const 4 i32.mul
+                          local.set $l4
+                          local.get $type i32.const 3 i32.eq
+                          (if
+                            (then
+                              i32.const 0x160000 local.get $l4 i32.add local.get $i i32.store
+                              i32.const 0x161000 local.get $l4 i32.add local.get $j i32.store
+                              )
+                            (else
+                              i32.const 0x160000 local.get $l4 i32.add local.get $j i32.store
+                              i32.const 0x161000 local.get $l4 i32.add local.get $i i32.store
+                              )
+                          )
+
+                          i32.const 0x162000 local.get $l4 i32.add f32.const 1.0 f32.store
+                          i32.const 0x163000 local.get $l4 i32.add f32.const 0.0 f32.store
+                          i32.const 0x164000 local.get $l4 i32.add f32.const 0.0 f32.store
+                          ))
+                      i32.const 0 local.set $pending_node
+                      i32.const 0 local.set $clicked_node
+                      ))
+              ))
+
+            ;; local.get $i
+            ;; local.get $x
+            ;; f32.const 3.0 f32.sub
+            ;; local.get $y
+            ;; f32.const 3.0 f32.sub
+            ;; call $i32draw
+
+            local.get $interactive
+            (if (then)
+              (else
+                local.get $x
+                local.get $y
+                local.get $r f32.const 5 f32.add
+
+                local.get $type i32.const 3 i32.eq
+                (if (result i32)
+                  (then
+                      i32.const 0xFF10E030
+                      i32.const 0xFF1000A0
+                      local.get $target local.get $activation f32.sub f32.abs f32.const 0.1 f32.lt
+                      local.get $solved (if (param i32) (result i32) (then local.tee $solved))
+                      select
+                      )
+                  (else
+                    i32.const 0xFFFF905F
+                    ))
+                call $draw_circle
+                ))
+
+            local.get $x
+            local.get $y
+            local.get $r
+            i32.const 0xFF90607F
+            call $draw_circle
+
+            local.get $type i32.const 3 i32.eq
+            (if (then
+                  local.get $target
+                  f32.const 0 f32.ge
+                  (if
+                    (then
+                      local.get $x
+                      local.get $y
+                      local.get $r local.get $target f32.mul
+                      i32.const 0xFF_70_90_90
+                      call $draw_circle)
+                    (else
+                      local.get $x
+                      local.get $y
+                      local.get $r
+                      local.get $r f32.const 1 local.get $target f32.add f32.mul
+                      i32.const 0xFF_B0_95_7F
+                      call $draw_ring))
+                  ))
+
+            local.get $activation
+            f32.const 0 f32.ge
+            (if
+              (then
+                local.get $x
+                local.get $y
+                local.get $r local.get $activation f32.mul
+                i32.const 0xFF50FFFF
+                call $draw_circle)
+              (else
+                local.get $x
+                local.get $y
+                local.get $r
+                local.get $r f32.const 1 local.get $activation f32.add f32.mul
+                i32.const 0xFF50FFFF
+                call $draw_ring))
+
+            local.get $type i32.const 3 i32.eq
+            (if (then
+                  local.get $x
+                  local.get $y
+                  local.get $r local.get $target f32.const 0.03 f32.add f32.mul
+                  local.get $r local.get $target f32.const 0.03 f32.sub f32.const 0 f32.max f32.mul
+                  i32.const 0xFF_70_A0_9F
+                  call $draw_ring
+                ))
+
+            i32.const 0x140000 local.get $i4 i32.add local.get $x  f32.store
+            i32.const 0x141000 local.get $i4 i32.add local.get $y  f32.store
+            i32.const 0x142000 local.get $i4 i32.add local.get $dx f32.store
+            i32.const 0x143000 local.get $i4 i32.add local.get $dy f32.store
+            i32.const 0x144000 local.get $i4 i32.add local.get $r  f32.store
+            i32.const 0x145000 local.get $i4 i32.add local.get $dr f32.store
+
+            end ;; skip if delete
+
+            local.get $i
+            i32.const 0
+            i32.gt_s
+            br_if $node_loop)
+      end
+
+      local.get $clicked
+      local.get $clicked_node i32.eqz i32.and
+      local.get $clicked_link i32.eqz i32.and
+      (if
+        (then
+          local.get $n_nodes
+          i32.const 4 i32.mul
+          local.set $i4
+
+          local.get $mx local.get $my
+          i32.const 0
+          call $create_node
+          local.set $clicked_node
+          ))
+
+      local.get $solved
+      local.get $clicked_node i32.eqz i32.and
+      local.get $clicked_link i32.eqz i32.and
+      local.set $solved
+
+      i32.const 0x0132004 local.get $clicked_node i32.store
+      i32.const 0x0132008 local.get $pending_node i32.store
+      i32.const 0x0133008 local.get $solved i32.store
+      )
+
+(func $siner (param $target f32) (param $attack f32) (param $release f32) (param $frequency f32) (param $address i32) (result f32)
+      (local $phase f32)
+      (local $amplitude f32)
+
+      local.get $address
+      f32.load
+      local.tee $phase
+      f32.const 0.159154943091895 f32.mul
+      local.tee $phase
+      local.get $phase
+      f32.floor
+      f32.sub
+      f32.const 6.283185307179586 f32.mul
+      local.set $phase
+
+      local.get $address
+      i32.const 4 i32.add f32.load
+      local.tee $amplitude
+      ;; local.get
+      )
+
 (func $oscillator (param $x0 f32) (param $decay f32) (param $k f32) (param $address i32) (result f32)
       (local $x f32)
       (local $dx f32)
@@ -568,46 +2214,69 @@
       local.set $ptr
 
       i32.const 0x12c008 i32.load
-      ;; i32.const 1 i32.and
+      i32.const 1 i32.and
       local.set $clicked
 
-      ;; local.get $clicked
-      ;; (if
-      ;;   (then
-      ;;     f32.const 0.5
-      ;;     local.set $noise)
-      ;;   (else
-      ;;     f32.const 0
-      ;;     local.set $noise))
+      local.get $clicked
+      (if
+        (then
+          i32.const 0x130010
+          i32.const 0x130010
+          f32.load
+          f32.const 0.2 f32.add
+          f32.store
+          ))
+
+      i32.const 0x12c00c i32.load
+      i32.const 1 i32.and
+      (if
+        (then
+          i32.const 0x130014
+          i32.const 0x130014
+          f32.load
+          f32.const 10.2 f32.add
+          f32.store
+          ))
 
       (loop $audio_loop
             local.get $writ
             i32.const 1 i32.add
             local.set $writ
 
-            local.get $clicked
-            (if
-              (then
-                call $randf_s
-                f32.const 0.001 f32.mul
-                local.set $noise)
-              (else
-                f32.const 0
-                local.set $noise))
+            call $randf_s
+            f32.const 0.5 f32.mul
+            local.set $noise
 
             local.get $noise
-
-            f32.const 0.9995 f32.const 0.01 i32.const 0x12F004 call $oscillator
-
-            ;; local.get $noise
-            ;; f32.const 0.9998 f32.const 0.02 i32.const 0x13000c call $oscillator
+            i32.const 0x132008 i32.load ;; pending_node
+            i32.eqz
+            i32.eqz
+            f32.convert_i32_s
+            f32.mul
+            f32.const 1.5
+            f32.mul
+            f32.const 0.9999 f32.const 0.0005 i32.const 0x12F004 call $oscillator
+            f32.const 0.9 i32.const 0x13002c call $lowpass
+            f32.const 0.9 i32.const 0x130030 call $lowpass
+            f32.const 0.9 i32.const 0x130034 call $lowpass
+            f32.const 0.89 i32.const 0x130038 call $highpass
+            f32.const 0.89 i32.const 0x13003c call $highpass
+            f32.const 0.89 i32.const 0x130040 call $highpass
+            ;; f32.const 0.9995 f32.const 0.0005 i32.const 0x12F00c call $oscillator
 
             local.get $noise
-            f32.const 0.9997 f32.const 0.01618 i32.const 0x13000c call $oscillator
+            f32.const 0.9998 f32.const 0.001 i32.const 0x13000c call $oscillator
+            f32.const 0.999 i32.const 0x130044 call $lowpass
+            f32.const 0.8 i32.const 0x130048 call $highpass
+            f32.const 0.5 f32.mul
+            f32.add
 
-            ;; f32.const 0.25 f32.mul
-            ;; f32.add
-            ;; f32.const 0.25 f32.mul
+            local.get $noise
+            f32.const 0.9990 f32.const 0.002 i32.const 0x130014 call $oscillator
+            f32.const 0.999 i32.const 0x13004c call $lowpass
+            ;; f32.const 0.9 i32.const 0x130054 call $lowpass
+            f32.const 0.9 i32.const 0x130050 call $highpass
+            f32.const 0.1 f32.mul
             f32.add
 
             f32.const 0
@@ -655,6 +2324,189 @@
       f32.mul
       f32.add)
 
+(func $fbm (param $x f32) (param $y f32) (result f32)
+      local.get $x
+      i32.trunc_f32_s
+      local.get $y
+      i32.trunc_f32_s
+      call $hash2d
+
+      local.get $x
+      f32.const 2.0 f32.mul
+      local.tee $x
+      i32.trunc_f32_s
+      local.get $y
+      f32.const 2.0 f32.mul
+      local.tee $y
+      i32.trunc_f32_s
+      call $hash2d
+      f32.add
+
+      local.get $x
+      f32.const 2.0 f32.mul
+      local.tee $x
+      i32.trunc_f32_s
+      local.get $y
+      f32.const 2.0 f32.mul
+      local.tee $y
+      i32.trunc_f32_s
+      call $hash2d
+      f32.add
+      f32.const 0.25 f32.mul
+
+      )
+
+(func $handle_buttons
+      (local $mx f32)
+      (local $my f32)
+      (local $clicked i32)
+      (local $level i32)
+      (local $color i32)
+      i32.const 0x12c008 i32.load
+      i32.const 1 i32.and
+      local.set $clicked
+
+      i32.const 0x133000 i32.load local.set $level
+
+      i32.const 0x12c000 f32.load local.set $mx
+      i32.const 0x12c004 f32.load local.set $my
+
+      i32.const 0x133004 i32.load
+      local.get $level i32.shr_u
+      i32.const 1 i32.and
+      if $level_completed
+
+      i32.const 0xFF_80_80_80 local.set $color
+      local.get $mx f32.const 608 f32.sub f32.abs
+      f32.const 16 f32.lt
+
+      local.get $my f32.const 240 f32.sub f32.abs
+      f32.const 32 f32.lt
+      i32.and
+      (if (then
+            i32.const 0xFF_FF_FF_FF local.set $color
+            local.get $clicked
+            (if (then
+                  i32.const 0x12c008 i32.const 0 i32.store
+
+                  local.get $level
+                  i32.const 1 i32.add
+                  i32.const 1 ;; do_load
+                  call $levels
+                  ))
+        ))
+
+      f32.const 608 f32.const 240
+      f32.const 16 f32.const 32
+      f32.const 1
+      local.get $color
+      call $draw_arrow
+      end ;; level_completed
+
+      local.get $level i32.const 1 i32.eq
+      (if (then return))
+
+      i32.const 0xFF_80_80_80 local.set $color
+      local.get $mx f32.const 32 f32.sub f32.abs
+      f32.const 16 f32.lt
+
+      local.get $my f32.const 240 f32.sub f32.abs
+      f32.const 32 f32.lt
+      i32.and
+      (if (then
+            i32.const 0xFF_FF_FF_FF local.set $color
+            local.get $clicked
+            (if (then
+                  i32.const 0x12c008 i32.const 0 i32.store
+
+                  local.get $level
+                  i32.const 1 i32.sub
+                  i32.const 1 ;; do_load
+                  call $levels
+                  ))
+        ))
+
+      f32.const 32 f32.const 240
+      f32.const 16 f32.const 32
+      f32.const -1
+      local.get $color
+      call $draw_arrow
+
+      )
+
+(func $handle_movement
+      (local $mx f32)
+      (local $my f32)
+      (local $px f32)
+      (local $py f32)
+      (local $sx f32)
+      (local $sy f32)
+      (local $scale f32)
+      (local $pan_clicking i32)
+
+      i32.const 0x132004 i32.load i32.eqz ;; clicked_node
+      i32.const 0x132014 i32.load i32.eqz ;; clicked_link
+      i32.or
+      (if (then) (else return))
+
+      i32.const 0x12c000 f32.load local.set $mx
+      i32.const 0x12c004 f32.load local.set $my
+
+      i32.const 0x12c010 i32.load
+      local.tee $pan_clicking
+      i32.const 1 i32.and
+      (if (then
+            i32.const 0x130818 local.get $mx f32.store
+            i32.const 0x13081c local.get $my f32.store
+            ))
+
+      i32.const 0x130808 f32.load local.set $px
+      i32.const 0x13080c f32.load local.set $py
+
+      i32.const 0x130810 f32.load local.set $scale
+
+      local.get $px
+      local.get $mx local.get $scale f32.div
+      f32.sub local.set $px
+
+      local.get $py
+      local.get $my local.get $scale f32.div
+      f32.sub local.set $py
+
+      i32.const 0x130810
+      i32.const 0x130810 f32.load
+      i32.const 0x12c014 f32.load ;; wheel
+      f32.const -0.001
+      f32.mul
+      call $exp
+      f32.mul
+      f32.store
+
+      local.get $pan_clicking
+      (if (then
+            i32.const 0x130818 f32.load local.set $sx
+            i32.const 0x13081c f32.load local.set $sy
+
+            f32.const 1 i32.const 0x130810 f32.load f32.div local.set $scale
+
+            local.get $mx local.get $sx f32.sub local.get $scale f32.mul local.get $px f32.add local.set $px
+            local.get $my local.get $sy f32.sub local.get $scale f32.mul local.get $py f32.add local.set $py
+
+            i32.const 0x130818 local.get $mx f32.store
+            i32.const 0x13081c local.get $my f32.store
+
+            ))
+
+      i32.const 0x130810 f32.load local.set $scale
+      local.get $mx local.get $scale f32.div
+      local.get $px f32.add local.set $px
+      local.get $my local.get $scale f32.div
+      local.get $py f32.add local.set $py
+
+      i32.const 0x130808 local.get $px f32.store
+      i32.const 0x13080c local.get $py f32.store
+      )
+
 (func (export "update")
       (local $i i32)
       (local $x i32)
@@ -662,6 +2514,28 @@
       (local $r f32)
       (local $offset_x f32)
       (local $offset_y f32)
+      (local $level i32)
+
+      i32.const 0x133000 i32.load local.tee $level
+      i32.eqz
+      (if (then
+            i32.const 2 ;; level
+            local.tee $level
+            i32.const 1 ;; do_load
+            call $levels
+            ))
+
+      local.get $level
+      i32.const 0
+      call $levels
+
+      ;; time
+      i32.const 0x0130804
+      i32.const 0x0130804
+      i32.load
+      i32.const 1
+      i32.add
+      i32.store
 
       ;; i32.const 0x12c008 i32.load
       ;; (if (then
@@ -689,33 +2563,11 @@
             i32.const 4
             i32.mul
 
-            local.get $x
-            f32.convert_i32_s
-            local.get $offset_x
-            f32.add
-            f32.const 0.01 f32.mul
-            call $saw
-            f32.const 0x1FE f32.mul
-            f32.const 0.1 f32.mul
-            i32.trunc_f32_s
-            i32.const 0xFF i32.and
-
-            local.get $y
-            f32.convert_i32_s
-            local.get $offset_y
-            f32.add
-            f32.const 0.01 f32.mul
-            call $saw
-            f32.const 0x1FE0000 f32.mul
-            f32.const 0.1 f32.mul
-            i32.trunc_f32_s
-            i32.const 0xFF0000 i32.and
-            i32.or
-
+            i32.const 0x402039
             i32.const 0xFF000000
             i32.or
 
-            ;;motion blur
+            ;; ;; motion blur
             ;; local.get $i
             ;; i32.const 4
             ;; i32.mul
@@ -735,12 +2587,143 @@
             i32.lt_s
             br_if $i_loop)
 
-      i32.const 0x0014_0000
-      i32.const 11
-      i32.const 0x12c000 f32.load
-      i32.const 0x12c004 f32.load
-      call $draw_text
+      ;; i32.const 0x0014_0000
+      ;; i32.const 11
+      ;; i32.const 0x12c000 f32.load
+      ;; i32.const 0x12c004 f32.load
+      ;; call $draw_text
 
-      call $update_particles
+      ;; call $update_particles
+      call $handle_movement
+      call $handle_buttons
+      call $update_links
+      call $update_nodes
+
+      ;; local.get $level
+      i32.const 0x0133004 i32.load
+      call $i32print
+
       call $process_audio
+      )
+
+(func $levels (param $i i32) (param $do_load i32)
+      local.get $do_load
+      (if (then
+            i32.const 0x133000 local.get $i i32.store
+
+            i32.const 0x130008 i32.const 0 i32.store
+            i32.const 0x13000c i32.const 0 i32.store
+            i32.const 0x130010 i32.const 0 i32.store
+            i32.const 0x130014 i32.const 0 i32.store
+            i32.const 0x130018 i32.const 0 i32.store
+            i32.const 0x13001c i32.const 0 i32.store
+
+            i32.const 0x130808 f32.const 0.0 f32.store
+            i32.const 0x13080c f32.const 0.0 f32.store
+            i32.const 0x130810 f32.const 1.0 f32.store
+
+            i32.const 0x132000 i32.const 0 i32.store
+            i32.const 0x132004 i32.const 0 i32.store
+            i32.const 0x132008 i32.const 0 i32.store
+            i32.const 0x132010 i32.const 0 i32.store
+            i32.const 0x132014 i32.const 0 i32.store
+
+            i32.const 0x0133008 i32.const 0 i32.store
+            ))
+      block $level7
+      block $level6
+      block $level5
+      block $level4
+      block $level3
+      block $level2
+      block $level1
+      block $level0
+      local.get $i
+      br_table $level0 $level1 $level2 $level3 $level4 $level5 $level6 $level7
+      end ;; level0
+      end ;; level1
+      local.get $do_load
+      (if (then
+            f32.const 128.0 f32.const 240.0
+            i32.const 1
+            call $create_node drop
+
+            f32.const 512.0 f32.const 240.0
+            i32.const 3
+            call $create_node drop
+
+            ;; targets
+            i32.const 0x147004 f32.const 0.5 f32.store
+            )
+        (else
+          ;; set inputs
+          i32.const 0x148000 f32.const 0.5 f32.store
+
+          i32.const 0x0133008 i32.load
+          (if (then
+                i32.const 0x133004
+                i32.const 0x133004 i32.load
+                i32.const 1 local.get $i i32.shl i32.or
+                i32.store))
+          ))
+      return
+      end ;; level2
+      local.get $do_load
+      (if (then
+            f32.const 128.0 f32.const 240.0
+            i32.const 1
+            call $create_node drop
+
+            f32.const 512.0 f32.const 240.0
+            i32.const 3
+            call $create_node drop
+
+            ;; targets
+            i32.const 0x147004 f32.const 0.5 f32.store
+            )
+        (else
+          ;; set inputs
+          i32.const 0x148000 f32.const 0.9 f32.store
+
+          i32.const 0x0133008 i32.load
+          (if (then
+                i32.const 0x133004
+                i32.const 0x133004 i32.load
+                i32.const 1 local.get $i i32.shl i32.or
+                i32.store))
+          ))
+      return
+      end ;; level3
+      local.get $do_load
+      (if (then
+            f32.const 128.0 f32.const 240.0
+            i32.const 1
+            call $create_node drop
+
+            f32.const 512.0 f32.const 240.0
+            i32.const 3
+            call $create_node drop
+            )
+        (else
+          ;; set targets
+          i32.const 0x148000 f32.const 0.5 f32.store
+          ;; targets
+          i32.const 0x147004 f32.const 1.0 f32.store
+
+          i32.const 0x0133008 i32.load
+          (if (then
+                i32.const 0x133004
+                i32.const 0x133004 i32.load
+                i32.const 1 local.get $i i32.shl i32.or
+                i32.store))
+          ))
+      return
+      end ;; level4
+      return
+      end ;; level5
+      return
+      end ;; level6
+      return
+      end ;; level7
+
       )

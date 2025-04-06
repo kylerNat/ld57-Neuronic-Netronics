@@ -48,13 +48,14 @@
                     console.log("updated wasm")
                 }
 
-                if(await check_for_file_change("index.html")) {
-                    window.location.reload();
-                }
+                <!-- if(await check_for_file_change("index.html")) { -->
+                <!--     window.location.reload(); -->
+                <!-- } -->
             }
             setInterval(monitor_files, 500);
 
             let canvas = document.getElementById("my_canvas");
+            canvas.oncontextmenu = (e) => {e.preventDefault();};
             const ctx = canvas.getContext("2d");
             ctx.fillStyle = "white"
             ctx.font = "24 sans"
@@ -80,6 +81,9 @@
                         }
                         drawn_text.length = 0
                         mem_i32[mouse_offset+2] = ((mem_i32[mouse_offset+2]<<1) | mem_i32[mouse_offset+2]) & 0x2;
+                        mem_i32[mouse_offset+3] = ((mem_i32[mouse_offset+3]<<1) | mem_i32[mouse_offset+3]) & 0x2;
+                        mem_i32[mouse_offset+4] = ((mem_i32[mouse_offset+4]<<1) | mem_i32[mouse_offset+4]) & 0x2;
+                        mem_f32[mouse_offset+5] = 0;
                     }
                     last_time += nominal_dt;
                 }
@@ -136,11 +140,23 @@
                 });
 
                 addEventListener("mousedown", (event) => {
-                    mem_i32[mouse_offset+2] = mem_i32[mouse_offset+2]|1;
+                    switch(event.button) {
+                        case 0: mem_i32[mouse_offset+2] = mem_i32[mouse_offset+2]|1; break;
+                        case 2: mem_i32[mouse_offset+3] = mem_i32[mouse_offset+3]|1; break;
+                        case 1: mem_i32[mouse_offset+4] = mem_i32[mouse_offset+4]|1; break;
+                    }
                 });
 
                 addEventListener("mouseup", (event) => {
-                    mem_i32[mouse_offset+2] = 0;
+                    switch(event.button) {
+                        case 0: mem_i32[mouse_offset+2] = 0; break;
+                        case 2: mem_i32[mouse_offset+3] = 0; break;
+                        case 1: mem_i32[mouse_offset+4] = 0; break;
+                    }
+                });
+
+                addEventListener("wheel", (event) => {
+                    mem_f32[mouse_offset+5] += event.deltaY;
                 });
 
                 ac.audioWorklet.addModule(worklet_url).then(() => {
@@ -155,13 +171,24 @@
                         sin: (x) => Math.sin(x),
                         cos: (x) => Math.cos(x),
                         exp: (x) => Math.exp(x),
-                        print: (x) => console.log(x),
+                        print: (x) => drawn_text.push(
+                         {
+                             text: `${x}`,
+                             x: 10,
+                             y: -10,
+                         }),
+                        draw_number: (value, x, y) => drawn_text.push(
+                         {
+                             text: `${value}`,
+                             x: x,
+                             y: -y,
+                        }),
                         draw_text: (i, len, x, y) => drawn_text.push(
                          {
                              text: text_decoder.decode(mem_u8.slice(i, i+len)),
                              x: x,
                              y: -y,
-                        })
+                        }),
                     },
                 }
 

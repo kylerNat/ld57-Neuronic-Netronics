@@ -1,7 +1,53 @@
 0x0000000 video block
 0x012c000 mouse_x
 0x012c004 mouse_y
-0x012c008 mouse_click
+0x012c008 left_click
+0x012c00c right_click
+0x012c010 middle_click
+0x012c014 scroll_wheel
+
 0x0130000 seed
 
+0x0130800 noise
+0x0130804 time
+0x0130808 pan_x
+0x013080c pan_y
+0x0130810 zoom
+0x0130814 
+0x0130818 pan_start_x
+0x013081c pan_start_y
 
+0x0132000 n_nodes
+0x0132004 clicked_node
+0x0132008 pending_node
+
+0x0132010 n_links
+0x0132014 clicked_link
+0x0132018 hovered_link
+
+0x0133000 current_level
+0x0133004 completed_levels
+0x0133008 solved
+0x013300c case_number
+0x0133010 consecutive_solved_cases
+
+0x0140000 node_x
+0x0141000 node_y
+0x0142000 node_dx
+0x0143000 node_dy
+0x0144000 node_r
+0x0145000 node_dr
+0x0146000 node_type
+0x0147000 node_target
+0x0148000 node_activation
+0x0149000 node_inputs
+
+0x0160000 link_node1
+0x0161000 link_node2
+0x0162000 link_strength
+0x0163000 link_r
+0x0164000 link_dr
+0x0165000 link_phase
+
+...
+0x0200000 end
