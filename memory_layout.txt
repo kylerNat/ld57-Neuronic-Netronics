@@ -20,16 +20,33 @@
 0x0132000 n_nodes
 0x0132004 clicked_node
 0x0132008 pending_node
+0x013200c pending_link
 
 0x0132010 n_links
 0x0132014 clicked_link
 0x0132018 hovered_link
+0x013201c new_node
 
 0x0133000 current_level
 0x0133004 completed_levels
-0x0133008 solved
+0x0133008 solved_time
 0x013300c case_number
-0x0133010 consecutive_solved_cases
+0x0133010 solved_cases
+0x0133014 shake_x
+0x0133018 shake_y
+0x013301c shake_dx
+0x0133020 shake_dy
+
+0x0134004 solved_secret
+0x0134008 secret_solved_time
+0x013400c secret_case_number
+0x0134010 secret_solved_cases
+0x0134014 secret_shake_x
+0x0134018 secret_shake_y
+0x013401c secret_shake_dx
+0x0134020 secret_shake_dy
+0x0134024 credits
+0x0134028 credits_dist
 
 0x0140000 node_x
 0x0141000 node_y
@@ -41,6 +58,8 @@
 0x0147000 node_target
 0x0148000 node_activation
 0x0149000 node_inputs
+
+0x0155000 credit strings
 
 0x0160000 link_node1
 0x0161000 link_node2

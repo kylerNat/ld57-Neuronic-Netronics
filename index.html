@@ -58,7 +58,7 @@
             canvas.oncontextmenu = (e) => {e.preventDefault();};
             const ctx = canvas.getContext("2d");
             ctx.fillStyle = "white"
-            ctx.font = "24 sans"
+            ctx.font = "32 sans"
             ctx.transform(1, 0, 0, -1, 0, 0)
 
             let last_time;
@@ -189,6 +189,21 @@
                              x: x,
                              y: -y,
                         }),
+                        save_data: (len, slot) => {
+                            document.cookie = slot+"="+window.btoa(String.fromCharCode.apply(null, mem_u8.slice(0x170000, 0x170000+len)))+";max-age=2592000;path=/";
+                        },
+                        load_data: (slot) => {
+                            let name = slot+"="
+                            const base64 = document.cookie.split("; ").find((row)=>row.startsWith(name))?.split("=")[1];
+                            if(base64) {
+                                const data = window.atob(base64);
+                                for(let i = 0; i < data.length; i++) {
+                                    mem_u8[0x170000+i] = data.charCodeAt(i);
+                                }
+                                return 1;
+                            }
+                            return 0
+                        },
                     },
                 }
 
